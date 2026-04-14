@@ -1,0 +1,23 @@
+[package]
+name = "block_perm"
+version = "0.1.0"
+edition = "2021"
+authors = ["anonymous"]
+description = "Block-permutation Monte Carlo ranks for per-window strategy PnL streams"
+
+[dependencies]
+rayon = "1.10"
+rand = { version = "0.8", features = ["small_rng"] }
+walkdir = "2"
+
+[[bin]]
+name = "block_perm"
+path = "src/main.rs"
+
+[[bin]]
+name = "mc_sharpe_pf"
+path = "src/bin/mc_sharpe_pf.rs"
+
+[profile.release]
+opt-level = 3
+lto = true

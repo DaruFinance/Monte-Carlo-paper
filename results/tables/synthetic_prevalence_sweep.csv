@@ -1,0 +1,4 @@
+Prevalence,Actual%,Baseline OOS%,N,MC-ROI p50 OOS%,MC-ROI p50 Lift,MC-ROI p50 %Edge,MC-ROI p50 Pool,MC-MDD p50 OOS%,MC-MDD p50 Lift,MC-MDD p50 %Edge,MC-MDD p50 Pool,MC-Calmar p50 OOS%,MC-Calmar p50 Lift,MC-Calmar p50 %Edge,MC-Calmar p50 Pool
+2%,2.0,51.4,6120,49.0,-2.5,1.7,2072,50.9,-0.6,1.9,2737,51.4,-0.1,1.7,2980
+10%,10.0,53.3,6666,50.7,-2.6,9.0,2237,52.4,-0.8,8.9,2950,52.9,-0.3,9.0,3219
+50%,50.0,61.4,12000,57.8,-3.6,46.0,3772,60.3,-1.1,48.4,5203,60.5,-1.0,48.0,5630

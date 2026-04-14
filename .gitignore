@@ -1,0 +1,37 @@
+# Rust
+rust/**/target/
+**/*.rs.bk
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# R
+R/out/*
+!R/out/.gitkeep
+.Rhistory
+.RData
+.Rproj.user/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# Logs and intermediate
+*.log
+*.bak
+*.bak_*
+
+# Raw aggregated WFO data — regenerated from block_perm_rs / upstream backtest.
+# Kept out of git to stay under GitHub's 1 GB soft limit. Stubs (*.csv.INFO)
+# documenting schema/size/md5 are still tracked so readers know what's expected.
+results/raw_data/*.csv

@@ -1,0 +1,24 @@
+[package]
+name = "strat_corr"
+version = "0.1.0"
+edition = "2021"
+authors = ["anonymous"]
+description = "Sparse bar-level PnL correlation + rolling cross-asset correlation tensor"
+
+[dependencies]
+rayon = "1.10"
+walkdir = "2"
+rand = { version = "0.8", features = ["small_rng"] }
+nalgebra = "0.33"
+
+[[bin]]
+name = "strat_corr"
+path = "src/main.rs"
+
+[[bin]]
+name = "corr_tensor"
+path = "src/bin/corr_tensor.rs"
+
+[profile.release]
+opt-level = 3
+lto = true
