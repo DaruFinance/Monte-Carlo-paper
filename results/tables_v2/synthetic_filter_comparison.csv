@@ -1,0 +1,8 @@
+Filter,Pool,OOS Prof%,Lift (pp),% With Edge
+No filter,24960,38.86,0.0,35.2
+IS PF>1,10854,43.54,4.68,37.2
+Std MC-ROI p50,4837,20.49,-18.37,32.2
+Std MC-MDD p50,12499,34.43,-4.44,35.3
+Boot MC-ROI p50,17771,37.88,-0.99,35.1
+Boot MC-ROI p75,0,,,
+Boot MC-ROI p50 + PF>1,7737,44.63,5.77,37.4

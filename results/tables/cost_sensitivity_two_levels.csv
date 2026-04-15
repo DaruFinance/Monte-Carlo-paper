@@ -1,0 +1,9 @@
+Asset,Cost Level,IS PF>1 pool,IS PF>1 OOS%,MC+IS pool,MC+IS OOS%,MC lift vs IS gate (pp)
+BTC,Baseline (standard cost),461704,34.31,165815,33.13,-1.18
+BTC,Cost +50% (fee-perturbed),338092,36.05,110605,34.96,-1.10
+DOGE,Baseline (standard cost),371105,38.85,133949,37.94,-0.91
+DOGE,Cost +50% (fee-perturbed),278793,40.12,92789,39.32,-0.80
+BNB,Baseline (standard cost),493117,32.10,174584,30.83,-1.27
+BNB,Cost +50% (fee-perturbed),354115,34.05,112952,32.98,-1.08
+SOL,Baseline (standard cost),132099,41.32,46628,40.26,-1.06
+SOL,Cost +50% (fee-perturbed),108591,42.47,36003,41.61,-0.86

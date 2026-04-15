@@ -941,21 +941,43 @@ def figure_6(syn):
 #  Figures 7 & 8: pre-saved synthetic pipeline summaries
 # ---------------------------------------------------------------------------
 def _load_pipeline_tables():
-    sum_path = TBL / 'synthetic_v4_summaries.csv'
-    if not sum_path.exists():
+    # Prefer the _matched.csv files produced by the current Rust synthetic
+    # pipeline; fall back to the legacy non-matched Python-era files.
+    sum_matched = TBL / 'synthetic_v4_summaries_matched.csv'
+    sum_legacy = TBL / 'synthetic_v4_summaries.csv'
+    if sum_matched.exists():
+        all_sum = pd.read_csv(sum_matched)
+    elif sum_legacy.exists():
+        all_sum = pd.read_csv(sum_legacy)
+    else:
         return None
-    all_sum = pd.read_csv(sum_path)
     tiers = {
         'null': all_sum[all_sum['tier'] == 'null'],
         'edge': all_sum[all_sum['tier'] == 'edge'],
         'adversarial': all_sum[all_sum['tier'] == 'adversarial'],
     }
-    filt_paths = {
-        'null': TBL / 'synthetic_v4_null_filters.csv',
-        'edge': TBL / 'synthetic_v4_edge_filters.csv',
-        'adversarial': TBL / 'synthetic_v4_adversarial_filters.csv',
-    }
-    filters = {k: pd.read_csv(p) for k, p in filt_paths.items() if p.exists()}
+
+    def _load_filters(tier):
+        matched = TBL / f'synthetic_v4_{tier}_filters_matched.csv'
+        legacy = TBL / f'synthetic_v4_{tier}_filters.csv'
+        if matched.exists():
+            df = pd.read_csv(matched)
+            # Rename matched snake_case schema to the Title-case the
+            # downstream figure code uses.
+            return df.rename(columns={
+                'filter': 'Filter', 'pool': 'Pool',
+                'oos_prof_pct': 'OOS Prof%', 'lift_pp': 'Lift (pp)',
+                'pool_pct': 'Pool %',
+            })
+        if legacy.exists():
+            return pd.read_csv(legacy)
+        return None
+
+    filters = {}
+    for tier in ('null', 'edge', 'adversarial'):
+        df = _load_filters(tier)
+        if df is not None:
+            filters[tier] = df
     return tiers, filters
 
 
@@ -968,8 +990,24 @@ def figure_7():
     tiers, tier_filters = loaded
     t1, t2, t3 = tiers['null'], tiers['edge'], tiers['adversarial']
 
-    sweep_path = TBL / 'synthetic_v4_signal_sweep.csv'
-    sweep_df = pd.read_csv(sweep_path) if sweep_path.exists() else None
+    sweep_matched = TBL / 'synthetic_v4_signal_sweep_matched.csv'
+    sweep_legacy = TBL / 'synthetic_v4_signal_sweep.csv'
+    if sweep_matched.exists():
+        sweep_df = pd.read_csv(sweep_matched)
+        # Matched schema encodes phi in the tier string as "sweep_phi_0.04".
+        sweep_df = sweep_df[sweep_df['tier'].str.startswith('sweep_phi_')].copy()
+        sweep_df['phi'] = sweep_df['tier'].str.replace('sweep_phi_', '',
+                                                       regex=False).astype(float)
+        sweep_df = sweep_df.rename(columns={
+            'mc_roi_lift_p50': 'mc_p50_lift',
+            'rob_all_lift': 'rob_lift',
+        })
+    elif sweep_legacy.exists():
+        sweep_df = pd.read_csv(sweep_legacy)
+        if 'rob_lift' not in sweep_df.columns:
+            sweep_df['rob_lift'] = np.nan  # legacy file lacks the column
+    else:
+        sweep_df = None
 
     fig, axes = plt.subplots(2, 3, figsize=(18, 11))
 

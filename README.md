@@ -35,7 +35,7 @@ Scripts_Clean/
 ├── LICENSE                  ← MIT
 ├── .gitignore
 │
-├── python/                  ← 8 scripts + README, reproduces every figure/table
+├── python/                  ← 11 scripts + README, reproduces every figure/table
 ├── rust/                    ← 3 crates + README (block_perm_rs, corr_rs, synthetic_pipeline_rust)
 ├── R/                       ← 5 verification scripts + helpers + README
 └── results/
@@ -82,13 +82,17 @@ pip install numpy pandas matplotlib scipy statsmodels seaborn joblib
 
 # 2. Regenerate every figure and table in the paper
 cd python
-python regenerate_all_figures.py        # figures 2–10
-python strategy_correlations.py         # figure 1 + Table 3
-python full_analysis.py                 # Tables 4, 6, 7, 9 and inline stats
-python block_perm_analysis.py           # Tables 5, 11, 12, 13, 19
+python regenerate_all_figures.py        # Figs 2-10
+python strategy_correlations.py         # Fig 1 summary + Table 3
+python correlation_figures.py           # Fig 1 per-asset panels (supplementary)
+python full_analysis.py                 # Tables 4, 5, 6 (headline), 7, 10 (derivs)
+python crypto_stratified_analysis.py    # Tables 6, 8, 17, 18
+python block_perm_analysis.py           # Table 19 breakdown
+python block_perm_bootstrap.py          # Table 19 window-cluster CI
 python calendar_cluster_bootstrap.py    # Table 15 / Fig 3 CIs
 python portfolio_mc_analysis.py         # Table 14
-python reviewer_analyses.py             # Tables 10, 16
+python reviewer_analyses.py             # Tables 10 (placebo), 16
+python synthetic_scenarios.py           # Synthetic A/B/C tables + sweeps
 
 # 3. (Optional) Cross-validate the statistics in R
 cd ../R
@@ -98,6 +102,50 @@ Rscript 03_block_permutation.R
 Rscript 04_strategy_correlations.R
 Rscript 05_portfolio_mc_ranks.R
 ```
+
+## How to reproduce every table and figure
+
+Every numbered table and figure in the paper can be traced back to a
+single producer script below. Run the producer from `python/` (or the
+Rust crate from `rust/`) with `MC_PAPER_DATA` pointing at a directory
+containing `results/raw_data/`.
+
+### Figures
+
+| Fig | File | Producer |
+|---|---|---|
+| 1 | `fig_strategy_correlations.pdf` | `python/strategy_correlations.py` (+ per-asset panels from `python/correlation_figures.py`) |
+| 2 | `window_level_mc_vs_oos.pdf` | `python/regenerate_all_figures.py` |
+| 3 | `fig_bootstrap_lift_distributions.pdf` | `python/calendar_cluster_bootstrap.py` + `regenerate_all_figures.py` |
+| 4 | `fig_regime_robustness.pdf` | `python/regenerate_all_figures.py` |
+| 5-8 | `fig_synthetic_*.pdf` | `rust/synthetic_pipeline_rust/` (+ `python/regenerate_all_figures.py`) |
+| 9 | `mc_pct_rank_distributions.pdf` | `python/regenerate_all_figures.py` |
+| 10 | `mc_roi_vs_next_oos_binned.pdf` | `python/regenerate_all_figures.py` |
+
+### Tables
+
+| Table | CSV(s) | Producer |
+|---|---|---|
+| 3 | `strategy_oos_summary.csv` | `python/strategy_correlations.py` |
+| 4 | `mc_pct_rank_summary.csv` | `python/full_analysis.py` |
+| 5 | `all_filters_comparison.csv` | `python/full_analysis.py` |
+| 6 (headline) | `filter_ranking_summary.csv` | `python/full_analysis.py` |
+| 6 (continuous) | `continuous_sharpe.csv` | `python/crypto_stratified_analysis.py` |
+| 7 | `mc_correlations.csv` | `python/full_analysis.py` |
+| 8 | `mc_by_family.csv` | `python/crypto_stratified_analysis.py` |
+| 10 (derivs) | `fair_comparison.csv` | `python/full_analysis.py` |
+| 10 (placebo) | `matched_pool_placebo.csv` | `python/reviewer_analyses.py` |
+| 14 | `portfolio_mc_summary.csv`, `strat_vs_portfolio_mc.csv` | `python/portfolio_mc_analysis.py` |
+| 15 | `empirical_bootstrap_ci.csv` | `python/calendar_cluster_bootstrap.py` |
+| 16 | `cost_sensitivity_two_levels.csv`, `cost_sensitivity_pf_sweep.csv` | `python/reviewer_analyses.py` |
+| 17 | `mc_selection_bias.csv` | `python/crypto_stratified_analysis.py` |
+| 18 | `pf_stratified_crypto.csv` | `python/crypto_stratified_analysis.py` |
+| 19 | `block_perm_per_asset.csv`, `block_perm_window_cluster_ci.csv` | `python/block_perm_analysis.py`, `python/block_perm_bootstrap.py` |
+| synth-A/B/C, prev sweep | `synthetic_{a,b,c,prevalence_sweep,filter_comparison,portfolio_results}.csv` | `python/synthetic_scenarios.py` |
+| synth v4 (Figs 5-8) | `synthetic_v4_*.csv` (+ `_matched.csv`) | `rust/synthetic_pipeline_rust/` |
+
+R cross-validation outputs live under `R/out/` and are indexed in
+`R/README.md`.
 
 ## Rebuilding the aggregated data from scratch (Rust stage)
 

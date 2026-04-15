@@ -1,138 +1,50 @@
 # Python analysis scripts
 
-This folder contains the cleaned Python scripts used to generate every
-figure, table, and inline statistic that appears in the paper. All
-scripts are fully self-contained and resolve paths relative to a common
-project root.
+Cleaned Python scripts that reproduce every figure, table, and inline
+statistic in the paper.
 
-## Layout and path conventions
+## Layout / paths
 
-Every script assumes the following directory layout under the project root
-(resolved as `Path(__file__).resolve().parents[2]`, or via the
-`MC_PAPER_DATA` environment variable if set):
+Every script resolves paths relative to the project root:
 
-    <ROOT>/
-      Scripts_Clean/python/        (this folder)
-      results/
-        raw_data/     # per-asset backtest / Rust-permutation CSVs
-        figures/      # PDF figure outputs
-        tables/       # CSV table outputs
+    ROOT = Path(os.environ["MC_PAPER_DATA"])       # if set
+         | Path(__file__).resolve().parents[1]     # else Scripts_Clean/
 
-Before running anything, place the per-asset CSVs listed below in
-`results/raw_data/` (they are produced by the backtesting pipeline and by
-the Rust block-permutation binary `block_perm_rs`). Either symlink the
-existing location or set `MC_PAPER_DATA` to point at the directory that
-contains `results/`.
+    <ROOT>/results/raw_data/   # per-asset CSVs (inputs)
+    <ROOT>/results/figures/    # PDF outputs
+    <ROOT>/results/tables/     # CSV outputs
+
+Set `MC_PAPER_DATA` to the directory containing `results/` if you run
+from a different location.
 
 ## Dependencies
 
-Standard scientific Python stack:
+    numpy pandas scipy matplotlib seaborn statsmodels joblib
 
-    numpy
-    pandas
-    scipy
-    matplotlib
-    seaborn
-
-No other third-party packages are required. Parallelism uses the stdlib
-`multiprocessing.Pool`. All RNG-using code is seeded (`np.random.seed(42)`
-or an explicit `RandomState`) for deterministic output.
+All RNG-using code is seeded (seed 42) for deterministic output.
 
 ## Scripts
 
-### `regenerate_all_figures.py` — master figure script
-Produces nine of the ten paper figures:
+| Script | Purpose | Inputs (from `results/raw_data/`) | Outputs | Paper targets |
+|---|---|---|---|---|
+| `regenerate_all_figures.py` | Master figure producer | `<asset>_window_pairs.csv`, `<asset>_mc_perwindow.csv` (all 9) | `results/figures/*.pdf` (9 figs) | Figs 2, 3, 4, 5, 6, 7, 8, 9, 10 |
+| `strategy_correlations.py` | Cross-asset correlation summary (Table 3 CSV) | `<asset>_window_pairs.csv` (all 9) | `strategy_oos_summary.csv`, `fig_strategy_correlations.pdf` | Fig 1 summary, Table 3 (`tab:corr_summary`) |
+| `correlation_figures.py` | Per-asset heatmaps + within/cross-family distributions | `<asset>_window_pairs.csv` (all 9) | `<asset>_family_corr.pdf`, `<asset>_strategy_corr.pdf`, `<asset>_corr_distribution.pdf`, `all_assets_corr_summary.pdf`, `correlation_summary.csv` | Fig 1 per-asset panels (`fig:strategy_correlations`) |
+| `full_analysis.py` | Crypto empirical analysis (rank, filters, MC correlations) | `<asset>_mc_perwindow.csv`, `<asset>_window_pairs.csv` (4 crypto) | `mc_pct_rank_summary.csv`, `all_filters_comparison.csv`, `filter_ranking_summary.csv`, `mc_correlations.csv`, `mc_filter_pass_fail.csv`, `fair_comparison.csv`, `is_oos_correlation_by_filter.csv`, `mc_filter_vs_next_oos.csv` | Table 4, Table 5, Table 6 headline, Table 7, Table 10 derivatives, pass/fail |
+| `crypto_stratified_analysis.py` | Stratified per-family / per-asset MC analysis | crypto `<asset>_mc_perwindow.csv`, `<asset>_window_pairs.csv` | `continuous_sharpe.csv`, `mc_by_family.csv`, `mc_selection_bias.csv`, `pf_stratified_crypto.csv` | Table 6, Table 8, Table 17, Table 18 |
+| `block_perm_analysis.py` | Per-asset block-permutation lift | `block_perm_<asset>.csv`, `<asset>_window_pairs.csv` | `block_perm_per_asset.csv` | Table 19 breakdown |
+| `block_perm_bootstrap.py` | Window-cluster bootstrap CIs | same as above | `block_perm_window_cluster_ci.csv` | Table 19 (`tab:block_perm_window_cluster_ci`) |
+| `calendar_cluster_bootstrap.py` | Calendar-quarter cluster bootstrap (10k resamples) | crypto + fx/commodity window_pairs + mc_perwindow | `empirical_bootstrap_ci.csv` | Table 15 calendar-cluster row, Fig 3 annotations |
+| `portfolio_mc_analysis.py` | Streaming portfolio-level MC | `<asset>_portfolio_mc.csv`, `<asset>_mc_perwindow.csv` (4 crypto) | `portfolio_mc_summary.csv`, `strat_vs_portfolio_mc.csv` | Table 14 |
+| `reviewer_analyses.py` | Matched-pool placebo + cost sensitivity | crypto window_pairs + mc_perwindow | `matched_pool_placebo.csv`, `cost_sensitivity_two_levels.csv`, `cost_sensitivity_pf_sweep.csv` | Table 10 placebo, Table 16 |
+| `synthetic_scenarios.py` | Synthetic scenario tables (pure-Python counterpart to Rust pipeline) | self-contained (seed 42) | `synthetic_a_filters.csv`, `synthetic_b_filters.csv`, `synthetic_c_portfolios.csv`, `synthetic_prevalence_sweep.csv`, `synthetic_filter_comparison.csv`, `synthetic_portfolio_results.csv` | Table synth-A, synth-B, synth-C, prevalence sweep |
 
-| Figure | File | Inputs |
-|---|---|---|
-| 2  | `window_level_mc_vs_oos.pdf`          | forex/commodity window_pairs + mc_perwindow |
-| 3  | `fig_bootstrap_lift_distributions.pdf`| crypto window_pairs + mc_perwindow |
-| 4  | `fig_regime_robustness.pdf`           | crypto window_pairs + mc_perwindow |
-| 5  | `fig_synthetic_mc_ranks.pdf`          | internal synthetic sim (seed 42) |
-| 6  | `fig_synthetic_mc_analysis.pdf`       | internal synthetic sim (seed 42) |
-| 7  | `fig_synthetic_pipeline_v4.pdf`       | `results/tables/synthetic_v4_*.csv` |
-| 8  | `fig_synthetic_pipeline_detail.pdf`   | `results/tables/synthetic_v4_*.csv` |
-| 9  | `mc_pct_rank_distributions.pdf`       | forex/commodity mc_perwindow |
-| 10 | `mc_roi_vs_next_oos_binned.pdf`       | forex/commodity window_pairs + mc_perwindow |
+## Reproducibility
 
-Run: `python regenerate_all_figures.py`
-Runtime: ~5 min (synthetic scenarios dominate; single-threaded NumPy).
-
-### `strategy_correlations.py` — Figure 1, Table 3
-Pairwise OOS Profit Factor correlation analysis. Within-family vs
-cross-family correlation distributions across all 9 instruments.
-
-- Inputs: `results/raw_data/*_window_pairs.csv` (9 assets)
-- Outputs: `results/figures/fig_strategy_correlations.pdf`,
-  `results/tables/strategy_oos_summary.csv`
-- Run: `python strategy_correlations.py`
-
-### `block_perm_analysis.py` — Tables 5, 11, 12, 13, 19
-Merges Rust block-permutation outputs with window_pairs and computes
-per-asset lift (rank >= 50 vs baseline) for block sizes 1/2/3/5/10/20.
-
-- Inputs: `results/raw_data/block_perm_<asset>.csv`,
-  `results/raw_data/<asset>_window_pairs.csv`
-- Outputs: `results/tables/block_perm_per_asset.csv`
-- Run: `python block_perm_analysis.py`
-
-### `calendar_cluster_bootstrap.py` — Table 15, Figure 3 annotations
-Calendar-quarter clustered bootstrap (10,000 resamples) of MC-ROI p50 lift,
-accounting for cross-asset calendar dependence. Multiprocessing
-(up to 32 workers). Deterministic seeds.
-
-- Inputs: same as above.
-- Outputs: `results/tables/empirical_bootstrap_ci.csv`
-- Run: `python calendar_cluster_bootstrap.py`
-- Runtime: ~1-2 min on a typical workstation.
-
-### `block_perm_bootstrap.py` — Supplementary CIs for Table 15
-Asset-window clustered bootstrap (alternative to the calendar-quarter
-clusters). Reports CIs for block sizes b = 1, 5, 10.
-
-- Inputs: same as above.
-- Outputs: `results/tables/block_perm_window_cluster_ci.csv`
-- Runtime: ~1-2 min.
-
-### `full_analysis.py` — Tables 4, 6, 7, 9
-Comprehensive crypto-asset empirical analysis (no figures — those live in
-`regenerate_all_figures.py`). Produces the summary CSVs feeding the MC
-rank distribution table, filter ranking, MC correlations, and IS-OOS
-correlation tables. Prints headline inline statistics cited in the paper.
-
-- Inputs: `results/raw_data/<asset>_mc_perwindow.csv`,
-  `results/raw_data/<asset>_window_pairs.csv` (4 crypto assets)
-- Outputs: `results/tables/mc_pct_rank_summary.csv`,
-  `mc_filter_vs_next_oos.csv`, `all_filters_comparison.csv`,
-  `filter_ranking_summary.csv`, `mc_correlations.csv`,
-  `is_oos_correlation_by_filter.csv`
-
-### `portfolio_mc_analysis.py` — Table 14
-Streaming portfolio-level MC analysis on large `*_portfolio_mc.csv`
-files; compares strategy-level and portfolio-level mean MC ROI rank.
-
-- Inputs: `results/raw_data/<asset>_portfolio_mc.csv`,
-  `<asset>_mc_perwindow.csv` (4 crypto assets)
-- Outputs: `results/tables/portfolio_mc_summary.csv`,
-  `strat_vs_portfolio_mc.csv`
-
-### `reviewer_analyses.py` — Tables 10, 16
-Matched-pool placebo test (random subsample of the IS-gated pool, same
-size as the MC-filtered pool) and two-level transaction cost sensitivity
-analysis plus an IS PF threshold sweep.
-
-- Inputs: same crypto window_pairs + mc_perwindow.
-- Outputs: `results/tables/matched_pool_placebo.csv`,
-  `cost_sensitivity_two_levels.csv`, `cost_sensitivity_pf_sweep.csv`
-
-## Reproducibility notes
-
-- All stochastic code is seeded. Bootstraps use fixed base seeds
-  (`42 + worker_index`) per `multiprocessing.Pool` worker for
-  deterministic output.
-- Synthetic scenarios in `regenerate_all_figures.py` use
-  `np.random.seed(42)` at the start of `run_synthetic_v3()`.
+- All stochastic code is seeded (`np.random.seed(42)` or explicit
+  `RandomState`). Bootstraps use fixed base seeds per worker.
 - Runtimes on a 16-core workstation:
-  - `regenerate_all_figures.py`: ~5 min (dominated by synthetic sims)
-  - `calendar_cluster_bootstrap.py` / `block_perm_bootstrap.py`: ~1-2 min each
+  - `regenerate_all_figures.py` ~5 min
+  - `calendar_cluster_bootstrap.py`, `block_perm_bootstrap.py` ~1-2 min
+  - `correlation_figures.py` ~2-3 min (9 assets, per-asset heatmaps)
   - all other scripts: seconds

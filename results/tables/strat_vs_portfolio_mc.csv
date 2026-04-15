@@ -1,0 +1,5 @@
+Asset,Strat_N,Strat_Mean_ROI_Rank,Strat_Mean_Sharpe_Rank,Strat_Pct_ROI_Above50,Port_N,Port_Mean_ROI_Rank,Port_Mean_Sharpe_Rank,Port_Pct_ROI_Above50
+SOL 1H,232568,40.1,39.6,36.5,136136,25.1,25.3,18.4
+BTC 30m,873132,40.8,40.1,37.3,252824,31.1,29.6,25.6
+DOGE 30m,673150,40.9,40.2,37.5,408408,33.7,31.2,28.3
+BNB 15m,996128,40.6,39.7,37.0,563931,37.1,33.6,33.2

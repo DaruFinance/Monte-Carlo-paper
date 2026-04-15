@@ -1,0 +1,5 @@
+Metric,MC-Filtered (rank>=50),MC-Rejected (rank<50)
+N,543432.0,963880.0
+Mean IS Profit Factor,1.39,1.58
+OOS Profitability (%),33.7,34.9
+OOS/IS PF Ratio,0.681,0.613

@@ -149,39 +149,39 @@ def section_all_filters(merged):
     rows = []
     for a in ASSETS:
         m = merged[a]
-        m_v = m[m['next_baseline_oos_pf'].notna()]
-        next_prof = m_v['next_baseline_oos_pf'] > 1.0
+        m_v = m[m['baseline_oos_pf'].notna()]
+        oos_prof = m_v['baseline_oos_pf'] > 1.0
         bl = m_v['baseline_is_pf'] > 1.0
-        baseline_rate = next_prof.mean() * 100
+        baseline_rate = oos_prof.mean() * 100
 
         filters = {
-            'No filter': (next_prof.mean() * 100, len(m_v)),
-            'IS PF>1': (next_prof[bl].mean() * 100 if bl.sum() > 0 else np.nan,
+            'No filter': (oos_prof.mean() * 100, len(m_v)),
+            'IS PF>1': (oos_prof[bl].mean() * 100 if bl.sum() > 0 else np.nan,
                         int(bl.sum())),
         }
         for test in ROBUSTNESS_TESTS:
             joint = bl & (m_v[f'{test}_is_pf'] > 1.0)
-            rate = next_prof[joint].mean() * 100 if joint.sum() > 0 else np.nan
+            rate = oos_prof[joint].mean() * 100 if joint.sum() > 0 else np.nan
             filters[f'Rob: {TEST_LABELS[test]}'] = (rate, int(joint.sum()))
         all4 = bl.copy()
         for t in ROBUSTNESS_TESTS:
             all4 = all4 & (m_v[f'{t}_is_pf'] > 1.0)
         filters['Rob: All 4'] = (
-            next_prof[all4].mean() * 100 if all4.sum() > 0 else np.nan,
+            oos_prof[all4].mean() * 100 if all4.sum() > 0 else np.nan,
             int(all4.sum()))
         for fname, (col, thresh) in mc_filters.items():
             passing = m_v[col] >= thresh
-            rate = next_prof[passing].mean() * 100 if passing.sum() > 0 else np.nan
+            rate = oos_prof[passing].mean() * 100 if passing.sum() > 0 else np.nan
             filters[fname] = (rate, int(passing.sum()))
         for fname, (col, thresh) in mc_filters.items():
             joint = bl & (m_v[col] >= thresh)
-            rate = next_prof[joint].mean() * 100 if joint.sum() > 0 else np.nan
+            rate = oos_prof[joint].mean() * 100 if joint.sum() > 0 else np.nan
             filters[f'{fname} + IS PF>1'] = (rate, int(joint.sum()))
 
         for fname, (rate, n) in filters.items():
             rows.append({
                 'Asset': a, 'Filter': fname,
-                'Next OOS Prof%': rate, 'Pool Size': n,
+                'Same-Window OOS Prof%': rate, 'Pool Size': n,
                 'Lift vs Baseline (pp)':
                     rate - baseline_rate if not np.isnan(rate) else np.nan,
             })
@@ -190,36 +190,37 @@ def section_all_filters(merged):
     savetable(df, 'all_filters_comparison.csv')
 
     summary = df.groupby('Filter').agg({
-        'Next OOS Prof%': 'mean',
+        'Same-Window OOS Prof%': 'mean',
         'Pool Size': 'mean',
         'Lift vs Baseline (pp)': 'mean',
-    }).round(1).sort_values('Next OOS Prof%', ascending=False)
+    }).round(1).sort_values('Same-Window OOS Prof%', ascending=False)
     savetable(summary.reset_index(), 'filter_ranking_summary.csv')
     print(summary.head(15).to_string())
 
 
 def section_correlations(merged):
-    """Table 7: MC rank vs next-window OOS Pearson correlations."""
+    """Table 7: MC rank vs same-window OOS-profitable Pearson correlations."""
     print("\n=== MC Rank vs OOS Correlations ===")
     rows = []
     for a in ASSETS:
         m = merged[a]
-        m_v = m[m['next_baseline_oos_pf'].notna()]
-        next_prof = (m_v['next_baseline_oos_pf'] > 1.0).astype(float)
-        next_pf = m_v['next_baseline_oos_pf']
+        m_v = m[m['baseline_oos_pf'].notna()]
+        oos_prof = (m_v['baseline_oos_pf'] > 1.0).astype(float)
         for mc_col, label in [('roi_pct_rank', 'ROI'),
                               ('sharpe_pct_rank', 'Sharpe'),
                               ('pf_pct_rank', 'PF')]:
-            for target, tlabel in [(next_prof, 'Next OOS Profitable'),
-                                    (next_pf, 'Next OOS PF')]:
-                valid = target.notna() & m_v[mc_col].notna()
-                if valid.sum() < 100:
-                    continue
-                r, p = stats.pearsonr(m_v.loc[valid, mc_col], target[valid])
-                rows.append({
-                    'Asset': a, 'Metric': f'{label} vs {tlabel}',
-                    'Pearson r': f'{r:.4f}', 'p-value': f'{p:.2e}',
-                })
+            valid = oos_prof.notna() & m_v[mc_col].notna()
+            if valid.sum() < 100:
+                continue
+            r, p = stats.pearsonr(m_v.loc[valid, mc_col], oos_prof[valid])
+            rows.append({
+                'Asset': a,
+                'MC Metric': label,
+                'Pearson r': f'{r:.4f}',
+                'p-value': f'{p:.2e}',
+                'R-squared %': f'{r * r * 100:.2f}',
+                'N': int(valid.sum()),
+            })
     savetable(pd.DataFrame(rows), 'mc_correlations.csv')
 
 
@@ -263,28 +264,107 @@ def section_is_oos(merged):
     savetable(pd.DataFrame(rows), 'is_oos_correlation_by_filter.csv')
 
 
+def section_fair_comparison(merged):
+    """Table 6: fair comparison with block-conditional baselines."""
+    print("\n=== Fair Comparison (Block-Conditional) ===")
+    mc_filters = [
+        ('MC-ROI p50', 'roi_pct_rank', 50),
+        ('MC-ROI p75', 'roi_pct_rank', 75),
+        ('MC-ROI p90', 'roi_pct_rank', 90),
+        ('MC-Sharpe p50', 'sharpe_pct_rank', 50),
+        ('MC-Sharpe p75', 'sharpe_pct_rank', 75),
+    ]
+    rows = []
+    for a in ASSETS:
+        m = merged[a]
+        m_v = m[m['baseline_oos_pf'].notna()]
+        oos_prof = m_v['baseline_oos_pf'] > 1.0
+        bl = m_v['baseline_is_pf'] > 1.0
+        baseline_prof = oos_prof.mean() * 100
+        gate_prof = oos_prof[bl].mean() * 100 if bl.sum() else np.nan
+        rows.append({'Asset': a, 'Block': 'Baseline', 'Filter': 'No filter',
+                     'OOS Prof%': round(baseline_prof, 2),
+                     'Pool': int(len(m_v)),
+                     'Lift vs Block Baseline (pp)': 0.0})
+        rows.append({'Asset': a, 'Block': 'Baseline', 'Filter': 'IS PF>1',
+                     'OOS Prof%': round(gate_prof, 2),
+                     'Pool': int(bl.sum()),
+                     'Lift vs Block Baseline (pp)': round(gate_prof - baseline_prof, 2)})
+        for fname, col, thresh in mc_filters:
+            passing = m_v[col] >= thresh
+            rate = oos_prof[passing].mean() * 100 if passing.sum() else np.nan
+            rows.append({'Asset': a, 'Block': 'A: No IS PF gate',
+                         'Filter': fname,
+                         'OOS Prof%': round(rate, 2),
+                         'Pool': int(passing.sum()),
+                         'Lift vs Block Baseline (pp)': round(rate - baseline_prof, 2)})
+        for fname, col, thresh in mc_filters:
+            joint = bl & (m_v[col] >= thresh)
+            rate = oos_prof[joint].mean() * 100 if joint.sum() else np.nan
+            rows.append({'Asset': a, 'Block': 'B: With IS PF>1 gate',
+                         'Filter': f'{fname} + IS PF>1',
+                         'OOS Prof%': round(rate, 2),
+                         'Pool': int(joint.sum()),
+                         'Lift vs Block Baseline (pp)': round(rate - gate_prof, 2)})
+    savetable(pd.DataFrame(rows), 'fair_comparison.csv')
+
+
+def section_mc_filter_pass_fail(merged):
+    """Table: MC filter pass/fail OOS profitability breakdown."""
+    print("\n=== MC Filter Pass/Fail ===")
+    mc_filters = [
+        ('MC-ROI p50', 'roi_pct_rank', 50),
+        ('MC-ROI p75', 'roi_pct_rank', 75),
+        ('MC-ROI p90', 'roi_pct_rank', 90),
+        ('MC-Sharpe p50', 'sharpe_pct_rank', 50),
+        ('MC-Sharpe p75', 'sharpe_pct_rank', 75),
+        ('MC-PF p50', 'pf_pct_rank', 50),
+        ('MC-PF p75', 'pf_pct_rank', 75),
+    ]
+    rows = []
+    for a in ASSETS:
+        m = merged[a]
+        m_v = m[m['baseline_oos_pf'].notna()]
+        oos_prof = m_v['baseline_oos_pf'] > 1.0
+        baseline_prof = oos_prof.mean() * 100
+        for fname, col, thresh in mc_filters:
+            passing = m_v[col] >= thresh
+            failing = ~passing
+            pass_rate = oos_prof[passing].mean() * 100 if passing.sum() else np.nan
+            fail_rate = oos_prof[failing].mean() * 100 if failing.sum() else np.nan
+            rows.append({
+                'Asset': a, 'Filter': fname,
+                'N Pass': int(passing.sum()),
+                'N Fail': int(failing.sum()),
+                'Pass OOS%': round(pass_rate, 1),
+                'Fail OOS%': round(fail_rate, 1),
+                'Lift (pp)': round(pass_rate - baseline_prof, 2),
+            })
+    savetable(pd.DataFrame(rows), 'mc_filter_pass_fail.csv')
+
+
 def section_headline(merged):
     print("\n" + "=" * 60)
     print("HEADLINE STATS (cited inline in paper)")
     print("=" * 60)
     for a in ASSETS:
         m = merged[a]
-        m_v = m[m['next_baseline_oos_pf'].notna()]
+        m_v = m[m['baseline_oos_pf'].notna()]
         bl = m_v['baseline_is_pf'] > 1.0
         all4 = bl.copy()
         for t in ROBUSTNESS_TESTS:
             all4 = all4 & (m_v[f'{t}_is_pf'] > 1.0)
         mc50 = m_v['roi_pct_rank'] >= 50
         mc75 = m_v['roi_pct_rank'] >= 75
-        next_prof = m_v['next_baseline_oos_pf'] > 1.0
+        oos_prof = m_v['baseline_oos_pf'] > 1.0
 
         print(f"\n{ASSET_LABELS[a]}:")
-        print(f"  Baseline: {next_prof.mean()*100:.1f}%")
-        print(f"  IS PF>1: {next_prof[bl].mean()*100:.1f}%")
-        print(f"  Rob All4: {next_prof[all4].mean()*100:.1f}%")
-        print(f"  MC ROI>=50: {next_prof[mc50].mean()*100:.1f}%")
-        print(f"  MC ROI>=75: {next_prof[mc75].mean()*100:.1f}%")
-        print(f"  Rob All4 + MC>=50: {next_prof[all4 & mc50].mean()*100:.1f}%")
+        print(f"  Baseline: {oos_prof.mean()*100:.1f}%")
+        print(f"  IS PF>1: {oos_prof[bl].mean()*100:.1f}%")
+        print(f"  Rob All4: {oos_prof[all4].mean()*100:.1f}%")
+        print(f"  MC ROI>=50: {oos_prof[mc50].mean()*100:.1f}%")
+        print(f"  MC ROI>=75: {oos_prof[mc75].mean()*100:.1f}%")
+        print(f"  Rob All4 + MC>=50: {oos_prof[all4 & mc50].mean()*100:.1f}%")
         print(f"  Mean MC ROI rank: {m['roi_pct_rank'].mean():.1f}")
 
 
@@ -296,6 +376,8 @@ def main():
     section_all_filters(merged)
     section_correlations(merged)
     section_is_oos(merged)
+    section_fair_comparison(merged)
+    section_mc_filter_pass_fail(merged)
     section_headline(merged)
     print("\nDone.")
 

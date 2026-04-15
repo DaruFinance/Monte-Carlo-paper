@@ -1,0 +1,5 @@
+Asset,IS PF>1 pool,IS PF>1 OOS%,MC+IS pool,MC+IS OOS%,MC lift (pp),Placebo mean OOS%,Placebo 95% CI,Placebo lift (pp),MC below placebo CI
+BTC,461704,34.31,165815,33.13,-1.18,34.30,"[34.11, 34.49]",-0.00,True
+DOGE,371105,38.85,133949,37.94,-0.91,38.85,"[38.64, 39.04]",0.00,True
+BNB,493117,32.10,174584,30.83,-1.27,32.10,"[31.93, 32.27]",0.00,True
+SOL,132099,41.32,46628,40.26,-1.06,41.33,"[40.98, 41.67]",0.01,True
