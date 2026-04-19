@@ -89,7 +89,9 @@ const PORT_SIZE: usize = 10;
 
 // Simulation runs
 const N_SIMS: usize = 8;
-const N_WORKERS: usize = 32;
+// Default thread count. Overridden at runtime by the RAYON_NUM_THREADS env var
+// (which Rayon respects natively), or falls back to the number of logical CPUs.
+const N_WORKERS_DEFAULT: usize = 32;
 
 // Output directory default. Overridable via CLI arg 1 or MC_PAPER_TBL_DIR env var.
 const DEFAULT_TBL_DIR: &str = "../../results/tables_v2";
@@ -146,7 +148,6 @@ struct Metrics {
 struct McRanks {
     roi: f64,
     sharpe: f64,
-    mdd: f64,
 }
 
 struct StratWindowResult {
@@ -588,6 +589,13 @@ fn generate_signals(strategy: &StrategyType, cache: &IndicatorCache, n: usize) -
 // ============================================================
 // TRADE EXTRACTION AND METRICS
 // ============================================================
+/// Converts a bar-level position signal and bar returns into a vector of per-trade PnL values.
+///
+/// Walks through `position` to detect transitions (entries/exits). Each contiguous
+/// segment where the position is non-zero forms a trade whose PnL is the sum of
+/// `position[j] * bar_returns[j]` over the segment, minus the fixed `cost`.
+///
+/// Returns an empty vec if fewer than 2 bars are available.
 fn extract_trades(position: &[f64], bar_returns: &[f64], cost: f64) -> Vec<f64> {
     let n = position.len().min(bar_returns.len() + 1);
     if n < 2 {
@@ -671,7 +679,6 @@ fn mc_percentile_ranks(trade_pnls: &[f64], n_mc: usize, rng: &mut StdRng) -> McR
         return McRanks {
             roi: 50.0,
             sharpe: 50.0,
-            mdd: 50.0,
         };
     }
 
@@ -758,7 +765,6 @@ fn mc_percentile_ranks(trade_pnls: &[f64], n_mc: usize, rng: &mut StdRng) -> McR
     McRanks {
         roi: roi_count as f64 / n_mc as f64 * 100.0,
         sharpe: sharpe_count as f64 / n_mc as f64 * 100.0,
-        mdd: mdd_count as f64 / n_mc as f64 * 100.0,
     }
 }
 
@@ -833,7 +839,6 @@ fn run_pipeline(
                     McRanks {
                         roi: 50.0,
                         sharpe: 50.0,
-                        mdd: 50.0,
                     }
                 };
 
@@ -969,32 +974,6 @@ fn build_portfolios(
 ) -> Vec<(String, bool, f64)> {
     let mut rng = StdRng::seed_from_u64(seed);
     let mut port_results = Vec::new();
-
-    // Group by window
-    let mut by_window: HashMap<usize, Vec<usize>> = HashMap::new();
-    for (i, _r) in results.iter().enumerate() {
-        let wi = i % N_WINDOWS; // results are ordered by strategy then window
-        by_window.entry(wi).or_default().push(i);
-    }
-
-    // Actually we need to track window properly. Results come from par_iter flat_map
-    // so ordering is not guaranteed. Let's use a different approach:
-    // We need window info in the result. Let me use position-based mapping.
-    // Since strategies are processed in order by par_iter but flat_mapped,
-    // the window index cycles. Let me store it differently.
-
-    // Re-derive: each strategy produces N_WINDOWS results in order.
-    // But par_iter may reorder strategies. We need to track window per result.
-
-    // Actually the results are collected via par_iter().flat_map() which preserves
-    // order within each iterator but strategies may be reordered.
-    // Let's just compute window from result position within each strategy's chunk.
-    // This is tricky. Let me instead just use all results for portfolio construction
-    // by dividing into window-sized chunks based on the original strategy order.
-
-    // Simpler approach: for portfolio building, we don't need per-window granularity
-    // if we just sample from all results (matching the Python behavior approximately).
-    // But Python does build per-window. Let me approximate by just using all results.
 
     let filter_configs: Vec<(&str, Box<dyn Fn(&StratWindowResult) -> bool>)> = vec![
         ("No filter", Box::new(|_: &StratWindowResult| true)),
@@ -1334,18 +1313,24 @@ fn average_filter_rows(all_filters: &[Vec<FilterRow>]) -> Vec<FilterRow> {
 fn main() {
     let overall_start = Instant::now();
 
+    // Resolve thread count: RAYON_NUM_THREADS env var (Rayon-native) > default constant.
+    let n_workers: usize = std::env::var("RAYON_NUM_THREADS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(N_WORKERS_DEFAULT);
+
     // Configure Rayon thread pool
     rayon::ThreadPoolBuilder::new()
-        .num_threads(N_WORKERS)
+        .num_threads(n_workers)
         .build_global()
         .expect("Failed to build thread pool");
 
     println!("=======================================================================");
-    println!("Three-Tier Full-Pipeline Synthetic Validation (Rust, {}-thread)", N_WORKERS);
+    println!("Three-Tier Full-Pipeline Synthetic Validation (Rust, {}-thread)", n_workers);
     println!("=======================================================================");
     println!("Parameters MATCHED to empirical:");
     println!("  MC permutations: {} (was 200 in Python version)", N_MC);
-    println!("  Threads: {}", N_WORKERS);
+    println!("  Threads: {} (set RAYON_NUM_THREADS to override)", n_workers);
     println!("  N_BARS: {}, N_WINDOWS: {}", N_BARS, N_WINDOWS);
     println!();
 

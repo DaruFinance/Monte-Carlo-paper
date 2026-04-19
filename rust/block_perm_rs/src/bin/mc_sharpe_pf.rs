@@ -22,6 +22,22 @@ use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
+/// Starting equity for ROI calculation (USD).
+const INIT_EQUITY: f64 = 1000.0;
+
+/// Profit-factor cap: replaces infinite PF when gross loss is near zero.
+const PF_CAP: f64 = 100.0;
+
+/// Parse trades.bin binary format.
+///
+/// Binary layout (little-endian):
+///   u16 name_len, <name bytes>,
+///   u16 lb_len,   <lookback bytes>,
+///   u16 sec_len,  <section bytes, e.g. "W03-IS">,
+///   u32 count,
+///   count * (u32 entry, u32 exit, u8 dir, f64 pnl)  [17 bytes/trade]
+///
+/// Returns Vec<(window_num, Vec<f64 pnl>)> for IS sections with >= min_trades.
 fn read_trades_bin(path: &Path, min_trades: usize) -> Vec<(u32, Vec<f64>)> {
     let data = match fs::read(path) {
         Ok(d) => d,
@@ -78,6 +94,7 @@ fn read_trades_bin(path: &Path, min_trades: usize) -> Vec<(u32, Vec<f64>)> {
             if pos + 17 > len {
                 break;
             }
+            // Layout: u32 entry (4) + u32 exit (4) + u8 dir (1) + f64 pnl (8) = 17 bytes
             let pnl = f64::from_le_bytes([
                 data[pos + 9],
                 data[pos + 10],
@@ -111,7 +128,7 @@ fn stats(pnls: &[f64]) -> (f64, f64, f64) {
     let var: f64 = pnls.iter().map(|p| (p - mean) * (p - mean)).sum::<f64>() / n;
     let std = var.sqrt();
     let sharpe = if std > 1e-12 { mean / std } else { 0.0 };
-    let roi = sum / 1000.0 * 100.0;
+    let roi = sum / INIT_EQUITY * 100.0;
     let mut pos = 0.0_f64;
     let mut neg = 0.0_f64;
     for &p in pnls {
@@ -124,13 +141,17 @@ fn stats(pnls: &[f64]) -> (f64, f64, f64) {
     let pf = if neg > 1e-12 {
         pos / neg
     } else if pos > 0.0 {
-        100.0
+        PF_CAP
     } else {
         1.0
     };
     (roi, sharpe, pf)
 }
 
+/// Bootstrap MC percentile ranks for a single strategy-window.
+///
+/// Returns `(actual_roi, actual_sharpe, actual_pf,
+///           roi_pct_rank, sharpe_pct_rank, pf_pct_rank)`.
 fn mc_ranks(
     pnls: &[f64],
     n_mc: u32,

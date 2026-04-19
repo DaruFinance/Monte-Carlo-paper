@@ -98,13 +98,16 @@ fn read_trades_bin(path: &Path, min_trades: usize) -> Vec<(u32, Vec<f64>)> {
     results
 }
 
+/// Starting equity for ROI calculation (USD).
+const INIT_EQUITY: f64 = 1000.0;
+
 #[inline]
 fn equity_roi(pnls: &[f64]) -> f64 {
-    let mut equity: f64 = 1000.0;
+    let mut equity: f64 = INIT_EQUITY;
     for &p in pnls {
         equity += p;
     }
-    (equity - 1000.0) / 1000.0 * 100.0
+    (equity - INIT_EQUITY) / INIT_EQUITY * 100.0
 }
 
 fn mc_iid_rank(pnls: &[f64], n_mc: u32, rng: &mut SmallRng) -> f64 {

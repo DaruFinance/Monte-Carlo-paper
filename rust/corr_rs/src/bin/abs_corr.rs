@@ -1,27 +1,19 @@
-//! strat_corr: sparse bar-level PnL correlation of strategies within an asset.
+//! Absolute-correlation analysis for strategy signal independence.
 //!
-//! Feeds Figure 1 (within-family vs cross-family bar-level PnL correlation) and
-//! Table 3 of the paper, via downstream Python
-//! `correlation_analysis/strategy_correlations.py`.
+//! Fixes the LLN cancellation bias in the original `strat_corr` binary:
+//! signed Pearson r ranges [-1, +1], so mean(r) → 0 by the law of large
+//! numbers even when real dependencies exist.  Using |r| (range [0, 1])
+//! reveals the true *strength* of dependence regardless of direction.
 //!
-//! For each strategy, OOS trades are expanded into a sparse {bar_index -> direction}
-//! representation, then Pearson correlations of centred direction vectors are
-//! computed over the intersection of occupied bars. Within-family and
-//! cross-family pair samples are taken with a fixed seed (42).
+//! Outputs:
+//!   {inst}_abs_summary.csv      – mean/percentiles of |r|, plus null baseline
+//!   {inst}_abs_histogram.csv    – 200-bin histogram of |r| in [0, 1]
+//!   {inst}_abs_fammatrix.csv    – family × family mean |r|
+//!   {inst}_abs_perfamily.csv    – per-family mean |r|
 //!
-//! Family classification uses generic technical-indicator prefixes
-//! (ATR / EMA / MACD / PPO / RSI / SMA / STOCHK). Strategies are discovered as
-//! `<base_dir>/<family>/<strategy>/trades.bin`.
+//! Usage: abs_corr <base_dir> <window_size> <instrument> <market> [output_dir]
 //!
-//! Output CSVs (to <output_dir>, default "."):
-//!   <instrument>_embed.csv       3D random-projection scatter coordinates
-//!   <instrument>_fammatrix.csv   family x family mean correlation
-//!   <instrument>_summary.csv     within/cross mean + percentiles
-//!   <instrument>_histogram.csv   200-bin histogram of within/cross correlations
-//!   <instrument>_perfamily.csv   per-family within-mean
-//!
-//! Run: cargo run --release --bin strat_corr -- <base_dir> <window_size> \
-//!          <instrument> <market: crypto|forex|commodity> [output_dir]
+//! Environment: set RAYON_NUM_THREADS=30 for 30-thread parallelism.
 
 use rayon::prelude::*;
 use std::collections::HashMap;
@@ -32,7 +24,7 @@ use walkdir::WalkDir;
 use rand::prelude::*;
 use rand::rngs::SmallRng;
 
-// ── Binary parser ──────────────────────────────────────────────────────────
+// ── Binary parser (same as main.rs) ────────────────────────────────────────
 
 fn read_trades_bin(path: &Path) -> Vec<(u32, bool, Vec<(u32, u32, i8)>)> {
     let data = match fs::read(path) { Ok(d) => d, Err(_) => return vec![] };
@@ -103,7 +95,7 @@ fn build_sparse_positions(sections: &[(u32, bool, Vec<(u32, u32, i8)>)], ws: u32
     sorted
 }
 
-// ── Strategy stats (no dense vectors) ─────────────────────────────────────
+// ── Strategy stats ───────────────────────────────────────────────────────
 
 struct StratStats {
     name: String,
@@ -111,12 +103,33 @@ struct StratStats {
     bars: Vec<(u32, i8)>,
     sum_dirs: f64,
     norm: f64,
-    embed: [f64; 3], // 3D random projection coordinates
 }
 
-// ── Sparse correlation (signed) ───────────────────────────────────────────
+// ── Sparse correlation (returns ABSOLUTE value) ──────────────────────────
 
-fn sparse_corr(a: &StratStats, b: &StratStats, nb: f64) -> f32 {
+fn sparse_abs_corr(a: &StratStats, b: &StratStats, nb: f64) -> f32 {
+    if a.norm < 1e-12 || b.norm < 1e-12 { return 0.0; }
+    let mean_a = a.sum_dirs / nb;
+    let mean_b = b.sum_dirs / nb;
+    let mut ia = 0usize;
+    let mut ib = 0usize;
+    let mut intersect_dot: f64 = 0.0;
+    while ia < a.bars.len() && ib < b.bars.len() {
+        let ba = a.bars[ia].0;
+        let bb = b.bars[ib].0;
+        if ba == bb {
+            intersect_dot += (a.bars[ia].1 as f64) * (b.bars[ib].1 as f64);
+            ia += 1; ib += 1;
+        } else if ba < bb { ia += 1; } else { ib += 1; }
+    }
+    let dot = intersect_dot - nb * mean_a * mean_b;
+    let r = dot / (a.norm * b.norm);
+    r.abs() as f32  // ← KEY CHANGE: absolute value
+}
+
+// ── Also compute signed r for comparison output ──────────────────────────
+
+fn sparse_signed_corr(a: &StratStats, b: &StratStats, nb: f64) -> f32 {
     if a.norm < 1e-12 || b.norm < 1e-12 { return 0.0; }
     let mean_a = a.sum_dirs / nb;
     let mean_b = b.sum_dirs / nb;
@@ -135,43 +148,21 @@ fn sparse_corr(a: &StratStats, b: &StratStats, nb: f64) -> f32 {
     (dot / (a.norm * b.norm)) as f32
 }
 
-// ── Hash-based random projection (deterministic, no matrix needed) ────────
-
-fn hash_proj(bar: u32, dim: u32) -> f64 {
-    // Simple deterministic hash → Gaussian-ish via Box-Muller on two hashes
-    let seed = (bar as u64).wrapping_mul(2654435761).wrapping_add(dim as u64 * 1442695040888963407);
-    let mut rng = SmallRng::seed_from_u64(seed);
-    rng.gen::<f64>() * 2.0 - 1.0
-}
-
-fn compute_embed(bars: &[(u32, i8)]) -> [f64; 3] {
-    let mut e = [0.0f64; 3];
-    for &(bar, dir) in bars {
-        let d = dir as f64;
-        e[0] += d * hash_proj(bar, 0);
-        e[1] += d * hash_proj(bar, 1);
-        e[2] += d * hash_proj(bar, 2);
-    }
-    // Normalize to unit sphere
-    let len = (e[0]*e[0] + e[1]*e[1] + e[2]*e[2]).sqrt();
-    if len > 1e-12 { e[0] /= len; e[1] /= len; e[2] /= len; }
-    e
-}
-
-// ── Null baseline: E[|r|] for independent series of length n ─────────────
-// For large n, r ~ N(0, 1/sqrt(n)), so |r| ~ half-normal with
-// E[|r|] = sqrt(2 / (pi * n)).
-
-fn null_expected_abs_r(n_obs: f64) -> f64 {
-    (2.0 / (std::f64::consts::PI * n_obs)).sqrt()
-}
-
 // ── Percentile helper ─────────────────────────────────────────────────────
 
 fn pct(s: &[f32], p: f64) -> f64 {
     if s.is_empty() { return 0.0; }
     let i = ((p / 100.0) * (s.len() - 1) as f64) as usize;
     s[i.min(s.len() - 1)] as f64
+}
+
+// ── Null baseline: E[|r|] for independent series of length n ─────────────
+// For large n, r ~ N(0, 1/sqrt(n)), so |r| ~ half-normal with
+// E[|r|] = sqrt(2 / (pi * n)).  This provides the baseline against which
+// observed mean(|r|) should be compared.
+
+fn null_expected_abs_r(n_obs: f64) -> f64 {
+    (2.0 / (std::f64::consts::PI * n_obs)).sqrt()
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────
@@ -185,8 +176,11 @@ const N_PERFAM: usize = 50_000;
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 5 {
-        eprintln!("Usage: strat_corr <base_dir> <window_size> <instrument> <market> [output_dir]");
+        eprintln!("Usage: abs_corr <base_dir> <window_size> <instrument> <market> [output_dir]");
         eprintln!("  market: crypto | forex | commodity");
+        eprintln!();
+        eprintln!("Computes ABSOLUTE Pearson correlation |r| to avoid LLN cancellation bias.");
+        eprintln!("Set RAYON_NUM_THREADS=30 for 30-thread parallelism.");
         std::process::exit(1);
     }
     let base_dir = &args[1];
@@ -214,7 +208,7 @@ fn main() {
     if n == 0 { eprintln!("No strategies found!"); std::process::exit(1); }
 
     // ── Read trades → sparse positions (parallel) ─────────────────────────
-    eprintln!("[{}] Reading trades...", instrument);
+    eprintln!("[{}] Reading trades (parallel)...", instrument);
     let sparse_data: Vec<(String, usize, Vec<(u32, i8)>)> = strats.par_iter()
         .map(|(name, fam, path)| {
             let secs = read_trades_bin(path);
@@ -223,7 +217,7 @@ fn main() {
         })
         .collect();
 
-    // ── Count unique bars ─────────────────────────────────────────────────
+    // ── Count unique bars (for Pearson denominator + null baseline) ───────
     eprintln!("[{}] Counting unique bars...", instrument);
     let mut all_bars: Vec<u32> = Vec::new();
     for (_, _, bars) in &sparse_data {
@@ -235,15 +229,18 @@ fn main() {
     drop(all_bars);
     eprintln!("[{}] {} unique bars", instrument, nb as u64);
 
-    // ── Build stats + 3D embedding (parallel, no dense vectors) ───────────
-    eprintln!("[{}] Building strategy stats + 3D embedding...", instrument);
+    // Null baseline for independent series
+    let null_abs_r = null_expected_abs_r(nb);
+    eprintln!("[{}] Null E[|r|] under independence: {:.6}", instrument, null_abs_r);
+
+    // ── Build stats (parallel) ────────────────────────────────────────────
+    eprintln!("[{}] Building strategy stats...", instrument);
     let stats: Vec<StratStats> = sparse_data.into_par_iter().map(|(name, fam, bars)| {
         let sum_dirs: f64 = bars.iter().map(|&(_, d)| d as f64).sum();
         let nnz = bars.len() as f64;
         let norm_sq = nnz - sum_dirs * sum_dirs / nb;
         let norm = if norm_sq > 0.0 { norm_sq.sqrt() } else { 0.0 };
-        let embed = compute_embed(&bars);
-        StratStats { name, family: fam, bars, sum_dirs, norm, embed }
+        StratStats { name, family: fam, bars, sum_dirs, norm }
     }).collect();
 
     // ── Group by family ───────────────────────────────────────────────────
@@ -261,25 +258,9 @@ fn main() {
         eprintln!("  {}: {} strategies", family_name(fk), fam_groups[&fk].len());
     }
 
-    // ── Write 3D embedding CSV ────────────────────────────────────────────
-    eprintln!("[{}] Writing embedding CSV...", instrument);
-    {
-        let path = format!("{}/{}_embed.csv", out_dir, instrument.to_lowercase());
-        let mut f = BufWriter::new(fs::File::create(&path).unwrap());
-        writeln!(f, "strategy,family,instrument,market,x,y,z").unwrap();
-        for s in &stats {
-            // Quote strategy name to handle names with commas like MACD(16,42)
-            writeln!(f, "\"{}\",{},{},{},{:.6},{:.6},{:.6}",
-                s.name, family_name(s.family), instrument, market,
-                s.embed[0], s.embed[1], s.embed[2]).unwrap();
-        }
-        eprintln!("[{}] Wrote {}", instrument, path);
-    }
-
-    // ── Sample within/cross pairs and compute correlations ────────────────
+    // ── Sample within/cross pairs ─────────────────────────────────────────
     let mut rng = SmallRng::seed_from_u64(42);
 
-    // Within-family pairs (weighted by pair count)
     let mut fam_pair_counts: Vec<(usize, u64)> = Vec::new();
     let mut total_within_pairs: u64 = 0;
     for &fk in &fam_keys {
@@ -308,7 +289,7 @@ fn main() {
     }
 
     let mut cross_pairs: Vec<(usize, usize)> = Vec::with_capacity(N_SAMPLES);
-    let eligible_fams: Vec<usize> = fam_keys.iter().filter(|&&fk| fam_groups[&fk].len() >= 1).cloned().collect();
+    let eligible_fams: Vec<usize> = fam_keys.iter().filter(|&&fk| !fam_groups[&fk].is_empty()).cloned().collect();
     for _ in 0..N_SAMPLES {
         let fa = eligible_fams[rng.gen_range(0..eligible_fams.len())];
         let mut fb = eligible_fams[rng.gen_range(0..eligible_fams.len())];
@@ -318,41 +299,108 @@ fn main() {
         cross_pairs.push((ga[rng.gen_range(0..ga.len())], gb[rng.gen_range(0..gb.len())]));
     }
 
-    eprintln!("[{}] Computing within-family correlations (sparse)...", instrument);
-    let within_corrs: Vec<f32> = within_pairs.par_iter().map(|&(a, b)| {
-        sparse_corr(&stats[a], &stats[b], nb)
+    // ── Compute |r| for all pairs (parallel, 30 threads) ─────────────────
+    eprintln!("[{}] Computing within-family |r| correlations...", instrument);
+    let within_abs: Vec<f32> = within_pairs.par_iter().map(|&(a, b)| {
+        sparse_abs_corr(&stats[a], &stats[b], nb)
     }).collect();
 
-    eprintln!("[{}] Computing cross-family correlations (sparse)...", instrument);
-    let cross_corrs: Vec<f32> = cross_pairs.par_iter().map(|&(a, b)| {
-        sparse_corr(&stats[a], &stats[b], nb)
+    eprintln!("[{}] Computing cross-family |r| correlations...", instrument);
+    let cross_abs: Vec<f32> = cross_pairs.par_iter().map(|&(a, b)| {
+        sparse_abs_corr(&stats[a], &stats[b], nb)
     }).collect();
 
-    let within_mean: f64 = within_corrs.iter().map(|&x| x as f64).sum::<f64>() / within_corrs.len() as f64;
-    let cross_mean: f64 = cross_corrs.iter().map(|&x| x as f64).sum::<f64>() / cross_corrs.len() as f64;
+    // Also compute signed for comparison
+    eprintln!("[{}] Computing signed correlations for comparison...", instrument);
+    let within_signed: Vec<f32> = within_pairs.par_iter().map(|&(a, b)| {
+        sparse_signed_corr(&stats[a], &stats[b], nb)
+    }).collect();
+    let cross_signed: Vec<f32> = cross_pairs.par_iter().map(|&(a, b)| {
+        sparse_signed_corr(&stats[a], &stats[b], nb)
+    }).collect();
 
-    let mut ws_sorted = within_corrs.clone(); ws_sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    let mut cs_sorted = cross_corrs.clone(); cs_sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    // ── Compute statistics ────────────────────────────────────────────────
+    let within_abs_mean: f64 = within_abs.iter().map(|&x| x as f64).sum::<f64>() / within_abs.len() as f64;
+    let cross_abs_mean: f64 = cross_abs.iter().map(|&x| x as f64).sum::<f64>() / cross_abs.len() as f64;
+    let within_signed_mean: f64 = within_signed.iter().map(|&x| x as f64).sum::<f64>() / within_signed.len() as f64;
+    let cross_signed_mean: f64 = cross_signed.iter().map(|&x| x as f64).sum::<f64>() / cross_signed.len() as f64;
 
-    eprintln!("[{}] Within: mean={:.4}, p50={:.4}, p90={:.4}, p95={:.4}, p99={:.4}",
-        instrument, within_mean, pct(&ws_sorted, 50.0), pct(&ws_sorted, 90.0), pct(&ws_sorted, 95.0), pct(&ws_sorted, 99.0));
-    eprintln!("[{}] Cross:  mean={:.4}, p50={:.4}, p90={:.4}, p95={:.4}, p99={:.4}",
-        instrument, cross_mean, pct(&cs_sorted, 50.0), pct(&cs_sorted, 90.0), pct(&cs_sorted, 95.0), pct(&cs_sorted, 99.0));
+    // Fraction exceeding thresholds
+    let within_above_01: f64 = within_abs.iter().filter(|&&x| x > 0.1).count() as f64 / within_abs.len() as f64;
+    let within_above_02: f64 = within_abs.iter().filter(|&&x| x > 0.2).count() as f64 / within_abs.len() as f64;
+    let within_above_05: f64 = within_abs.iter().filter(|&&x| x > 0.5).count() as f64 / within_abs.len() as f64;
+    let cross_above_01: f64 = cross_abs.iter().filter(|&&x| x > 0.1).count() as f64 / cross_abs.len() as f64;
+    let cross_above_02: f64 = cross_abs.iter().filter(|&&x| x > 0.2).count() as f64 / cross_abs.len() as f64;
+    let cross_above_05: f64 = cross_abs.iter().filter(|&&x| x > 0.5).count() as f64 / cross_abs.len() as f64;
 
-    // ── Absolute correlation statistics ──────────────────────────────────
-    let within_abs_mean: f64 = within_corrs.iter().map(|&x| (x as f64).abs()).sum::<f64>() / within_corrs.len() as f64;
-    let cross_abs_mean: f64 = cross_corrs.iter().map(|&x| (x as f64).abs()).sum::<f64>() / cross_corrs.len() as f64;
-    let null_abs_r = null_expected_abs_r(nb);
+    let mut ws_sorted = within_abs.clone(); ws_sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let mut cs_sorted = cross_abs.clone(); cs_sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
 
-    eprintln!("[{}] ── Absolute correlation |r| ──", instrument);
+    // Excess over null (how much above random)
+    let within_excess = within_abs_mean - null_abs_r;
+    let cross_excess = cross_abs_mean - null_abs_r;
+
+    eprintln!("[{}] ═══ ABSOLUTE CORRELATION RESULTS ═══", instrument);
     eprintln!("[{}] Null E[|r|] (independence): {:.6}", instrument, null_abs_r);
-    eprintln!("[{}] Within |r| mean={:.6} (excess={:+.6})", instrument, within_abs_mean, within_abs_mean - null_abs_r);
-    eprintln!("[{}] Cross  |r| mean={:.6} (excess={:+.6})", instrument, cross_abs_mean, cross_abs_mean - null_abs_r);
+    eprintln!("[{}] Within |r|: mean={:.6} (excess={:+.6}), p50={:.6}, p90={:.6}, p95={:.6}, p99={:.6}",
+        instrument, within_abs_mean, within_excess,
+        pct(&ws_sorted, 50.0), pct(&ws_sorted, 90.0), pct(&ws_sorted, 95.0), pct(&ws_sorted, 99.0));
+    eprintln!("[{}] Cross  |r|: mean={:.6} (excess={:+.6}), p50={:.6}, p90={:.6}, p95={:.6}, p99={:.6}",
+        instrument, cross_abs_mean, cross_excess,
+        pct(&cs_sorted, 50.0), pct(&cs_sorted, 90.0), pct(&cs_sorted, 95.0), pct(&cs_sorted, 99.0));
+    eprintln!("[{}] Signed mean (for reference): within={:.6}, cross={:.6}", instrument, within_signed_mean, cross_signed_mean);
+    eprintln!("[{}] Within |r|>0.1: {:.2}%, |r|>0.2: {:.2}%, |r|>0.5: {:.2}%",
+        instrument, within_above_01 * 100.0, within_above_02 * 100.0, within_above_05 * 100.0);
+    eprintln!("[{}] Cross  |r|>0.1: {:.2}%, |r|>0.2: {:.2}%, |r|>0.5: {:.2}%",
+        instrument, cross_above_01 * 100.0, cross_above_02 * 100.0, cross_above_05 * 100.0);
 
-    // ── Family × family correlation matrix ────────────────────────────────
-    eprintln!("[{}] Computing family×family correlation matrix...", instrument);
+    // ── Write summary CSV ─────────────────────────────────────────────────
+    {
+        let path = format!("{}/{}_abs_summary.csv", out_dir, instrument.to_lowercase());
+        let mut f = BufWriter::new(fs::File::create(&path).unwrap());
+        writeln!(f, "instrument,market,n_strategies,n_bars,null_expected_abs_r,\
+            within_abs_mean,within_excess,within_signed_mean,within_p50,within_p90,within_p95,within_p99,\
+            within_pct_above_01,within_pct_above_02,within_pct_above_05,\
+            cross_abs_mean,cross_excess,cross_signed_mean,cross_p50,cross_p90,cross_p95,cross_p99,\
+            cross_pct_above_01,cross_pct_above_02,cross_pct_above_05").unwrap();
+        writeln!(f, "{},{},{},{},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.4},{:.4},{:.4},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.4},{:.4},{:.4}",
+            instrument, market, n, nb as u64, null_abs_r,
+            within_abs_mean, within_excess, within_signed_mean,
+            pct(&ws_sorted, 50.0), pct(&ws_sorted, 90.0), pct(&ws_sorted, 95.0), pct(&ws_sorted, 99.0),
+            within_above_01, within_above_02, within_above_05,
+            cross_abs_mean, cross_excess, cross_signed_mean,
+            pct(&cs_sorted, 50.0), pct(&cs_sorted, 90.0), pct(&cs_sorted, 95.0), pct(&cs_sorted, 99.0),
+            cross_above_01, cross_above_02, cross_above_05
+        ).unwrap();
+        eprintln!("[{}] Wrote {}", instrument, path);
+    }
+
+    // ── Write histogram CSV (|r| in [0, 1]) ──────────────────────────────
+    {
+        let path = format!("{}/{}_abs_histogram.csv", out_dir, instrument.to_lowercase());
+        let mut f = BufWriter::new(fs::File::create(&path).unwrap());
+        let n_bins: usize = 200;
+        let mut within_hist = vec![0u32; n_bins];
+        let mut cross_hist = vec![0u32; n_bins];
+        for &c in &within_abs {
+            let bin = (c as f64 * n_bins as f64) as usize;
+            within_hist[bin.min(n_bins - 1)] += 1;
+        }
+        for &c in &cross_abs {
+            let bin = (c as f64 * n_bins as f64) as usize;
+            cross_hist[bin.min(n_bins - 1)] += 1;
+        }
+        writeln!(f, "bin_center,within_count,cross_count").unwrap();
+        for i in 0..n_bins {
+            let center = (i as f64 + 0.5) / n_bins as f64;
+            writeln!(f, "{:.4},{},{}", center, within_hist[i], cross_hist[i]).unwrap();
+        }
+        eprintln!("[{}] Wrote {}", instrument, path);
+    }
+
+    // ── Family × family |r| matrix ───────────────────────────────────────
+    eprintln!("[{}] Computing family×family |r| matrix...", instrument);
     let nf = fam_keys.len();
-    // Build pair list for each (i,j) family combination
     let mut fam_matrix_pairs: Vec<(usize, usize, Vec<(usize, usize)>)> = Vec::new();
     for fi in 0..nf {
         for fj in fi..nf {
@@ -360,13 +408,13 @@ fn main() {
             let fb = fam_keys[fj];
             let ga = &fam_groups[&fa];
             let gb = &fam_groups[&fb];
-            let mut pairs: Vec<(usize, usize)> = Vec::new();
             let n_samp = if fi == fj {
                 let sz = ga.len();
                 if sz < 2 { 0 } else { N_PERFAM.min(sz * (sz - 1) / 2) }
             } else {
                 N_PERFAM.min(ga.len() * gb.len())
             };
+            let mut pairs: Vec<(usize, usize)> = Vec::new();
             for _ in 0..n_samp {
                 if fi == fj {
                     let a = rng.gen_range(0..ga.len());
@@ -383,19 +431,17 @@ fn main() {
 
     let fam_matrix_corrs: Vec<(usize, usize, f64)> = fam_matrix_pairs.par_iter().map(|(fi, fj, pairs)| {
         if pairs.is_empty() { return (*fi, *fj, 0.0); }
-        let sum: f64 = pairs.iter().map(|&(a, b)| sparse_corr(&stats[a], &stats[b], nb) as f64).sum();
+        let sum: f64 = pairs.iter().map(|&(a, b)| sparse_abs_corr(&stats[a], &stats[b], nb) as f64).sum();
         (*fi, *fj, sum / pairs.len() as f64)
     }).collect();
 
     // ── Write family matrix CSV ───────────────────────────────────────────
     {
-        let path = format!("{}/{}_fammatrix.csv", out_dir, instrument.to_lowercase());
+        let path = format!("{}/{}_abs_fammatrix.csv", out_dir, instrument.to_lowercase());
         let mut f = BufWriter::new(fs::File::create(&path).unwrap());
-        // Header row
         write!(f, "family").unwrap();
         for &fk in &fam_keys { write!(f, ",{}", family_name(fk)).unwrap(); }
         writeln!(f).unwrap();
-        // Fill symmetric matrix
         let mut matrix = vec![vec![0.0f64; nf]; nf];
         for &(fi, fj, corr) in &fam_matrix_corrs {
             matrix[fi][fj] = corr;
@@ -409,48 +455,11 @@ fn main() {
         eprintln!("[{}] Wrote {}", instrument, path);
     }
 
-    // ── Write summary CSV ─────────────────────────────────────────────────
+    // ── Write per-family CSV ──────────────────────────────────────────────
     {
-        let path = format!("{}/{}_summary.csv", out_dir, instrument.to_lowercase());
+        let path = format!("{}/{}_abs_perfamily.csv", out_dir, instrument.to_lowercase());
         let mut f = BufWriter::new(fs::File::create(&path).unwrap());
-        writeln!(f, "instrument,market,n_strategies,n_bars,within_mean,within_p50,within_p90,within_p95,within_p99,cross_mean,cross_p50,cross_p90,cross_p95,cross_p99,within_abs_mean,cross_abs_mean,null_expected_abs_r").unwrap();
-        writeln!(f, "{},{},{},{},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6}",
-            instrument, market, n, nb as u64,
-            within_mean, pct(&ws_sorted, 50.0), pct(&ws_sorted, 90.0), pct(&ws_sorted, 95.0), pct(&ws_sorted, 99.0),
-            cross_mean, pct(&cs_sorted, 50.0), pct(&cs_sorted, 90.0), pct(&cs_sorted, 95.0), pct(&cs_sorted, 99.0),
-            within_abs_mean, cross_abs_mean, null_abs_r
-        ).unwrap();
-        eprintln!("[{}] Wrote {}", instrument, path);
-    }
-
-    // ── Write histogram CSV (binned, much smaller than raw samples) ──────
-    {
-        let path = format!("{}/{}_histogram.csv", out_dir, instrument.to_lowercase());
-        let mut f = BufWriter::new(fs::File::create(&path).unwrap());
-        let n_bins: usize = 200; // bins from -1.0 to 1.0
-        let mut within_hist = vec![0u32; n_bins];
-        let mut cross_hist = vec![0u32; n_bins];
-        for &c in &within_corrs {
-            let bin = ((c as f64 + 1.0) / 2.0 * n_bins as f64) as usize;
-            within_hist[bin.min(n_bins - 1)] += 1;
-        }
-        for &c in &cross_corrs {
-            let bin = ((c as f64 + 1.0) / 2.0 * n_bins as f64) as usize;
-            cross_hist[bin.min(n_bins - 1)] += 1;
-        }
-        writeln!(f, "bin_center,within_count,cross_count").unwrap();
-        for i in 0..n_bins {
-            let center = -1.0 + (i as f64 + 0.5) * 2.0 / n_bins as f64;
-            writeln!(f, "{:.4},{},{}", center, within_hist[i], cross_hist[i]).unwrap();
-        }
-        eprintln!("[{}] Wrote {}", instrument, path);
-    }
-
-    // ── Per-family within-mean (for per-family bar chart) ─────────────────
-    {
-        let path = format!("{}/{}_perfamily.csv", out_dir, instrument.to_lowercase());
-        let mut f = BufWriter::new(fs::File::create(&path).unwrap());
-        writeln!(f, "instrument,market,family,n_strategies,within_mean").unwrap();
+        writeln!(f, "instrument,market,family,n_strategies,within_abs_mean").unwrap();
         for &(fi, fj, corr) in &fam_matrix_corrs {
             if fi == fj {
                 writeln!(f, "{},{},{},{},{:.6}",
@@ -461,5 +470,5 @@ fn main() {
         eprintln!("[{}] Wrote {}", instrument, path);
     }
 
-    eprintln!("[{}] Done!", instrument);
+    eprintln!("[{}] ═══ DONE ═══", instrument);
 }

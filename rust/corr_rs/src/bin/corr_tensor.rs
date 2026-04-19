@@ -59,6 +59,8 @@ fn parse_csv(path: &str, name: &str, time_col: &str) -> Series {
             Ok(v) => v,
             Err(_) => continue, // skip non-numeric timestamps (e.g. datetime strings)
         };
+        // Heuristic: timestamps above 10 billion are milliseconds (crypto CSVs),
+        // those below are already in seconds (forex/commodity CSVs).
         let ts_sec = if ts_raw > 10_000_000_000 {
             ts_raw / 1000
         } else {
