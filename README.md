@@ -74,11 +74,28 @@ Two end-to-end spot-checks were performed after the cleanup:
    and 8/9 per-asset 95% CIs exclude zero (only XAU/USD is marginal),
    matching the paper's headline direction and magnitude.
 
-## Quick start
+## Quick start (with synthetic data)
+
+If you don't have the real aggregated data, you can generate synthetic
+sample data that matches all schemas so you can verify the pipeline runs
+end-to-end:
+
+```bash
+# 0. Generate synthetic data (creates ~35 small CSVs in results/raw_data/)
+python generate_synthetic_data.py
+
+# If you have real data, the script backs up existing files to *.real.bak
+```
+
+The synthetic data is structurally correct but contains random values, so
+numerical results will not match the paper. Use it to verify that scripts
+execute without errors.
+
+## Quick start (with real data)
 
 ```bash
 # 1. Python dependencies
-pip install numpy pandas matplotlib scipy statsmodels seaborn joblib
+pip install numpy pandas matplotlib scipy seaborn
 
 # 2. Regenerate every figure and table in the paper
 cd python

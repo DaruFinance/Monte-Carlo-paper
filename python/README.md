@@ -19,7 +19,7 @@ from a different location.
 
 ## Dependencies
 
-    numpy pandas scipy matplotlib seaborn statsmodels joblib
+    numpy pandas scipy matplotlib seaborn
 
 All RNG-using code is seeded (seed 42) for deterministic output.
 
