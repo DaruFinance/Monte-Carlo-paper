@@ -19,6 +19,10 @@ path = "src/main.rs"
 name = "corr_tensor"
 path = "src/bin/corr_tensor.rs"
 
+[[bin]]
+name = "abs_corr"
+path = "src/bin/abs_corr.rs"
+
 [profile.release]
 opt-level = 3
 lto = true

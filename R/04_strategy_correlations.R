@@ -107,6 +107,11 @@ if (file.exists(summary_path)) {
     vals_w <- vals[same_fam]
     vals_c <- vals[!same_fam]
 
+    # Absolute correlation |r|
+    abs_vals_w <- abs(vals_w)
+    abs_vals_c <- abs(vals_c)
+    null_abs_r <- sqrt(2 / (pi * nrow(mat)))  # E[|r|] under independence
+
     rows[[asset]] <- data.table(
       asset                      = ASSET_LABEL[[asset]],
       n_strategies_sampled       = length(strat_names),
@@ -117,12 +122,18 @@ if (file.exists(summary_path)) {
       mean_cross_family_corr     = round(mean(vals_c, na.rm = TRUE), 4),
       median_cross_family_corr   = round(median(vals_c, na.rm = TRUE), 4),
       pct_within_above_07        = round(mean(vals_w > 0.7, na.rm = TRUE) * 100, 3),
-      pct_cross_above_07         = round(mean(vals_c > 0.7, na.rm = TRUE) * 100, 3)
+      pct_cross_above_07         = round(mean(vals_c > 0.7, na.rm = TRUE) * 100, 3),
+      mean_within_abs_corr       = round(mean(abs_vals_w, na.rm = TRUE), 4),
+      mean_cross_abs_corr        = round(mean(abs_vals_c, na.rm = TRUE), 4),
+      null_expected_abs_r        = round(null_abs_r, 6)
     )
-    cat(sprintf("  %-8s  within mean=%.4f  cross mean=%.4f\n",
+    cat(sprintf("  %-8s  within mean=%.4f  cross mean=%.4f  |r| within=%.4f  |r| cross=%.4f  null=%.6f\n",
                 ASSET_LABEL[[asset]],
                 rows[[asset]]$mean_within_family_corr,
-                rows[[asset]]$mean_cross_family_corr))
+                rows[[asset]]$mean_cross_family_corr,
+                rows[[asset]]$mean_within_abs_corr,
+                rows[[asset]]$mean_cross_abs_corr,
+                rows[[asset]]$null_expected_abs_r))
   }
   result <- rbindlist(rows)
   cat("\n=== Fallback within/cross family correlation summary ===\n")
