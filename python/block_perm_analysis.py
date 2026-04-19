@@ -71,18 +71,21 @@ def main():
         bp = pd.read_csv(bp_path)
         wp = pd.read_csv(wp_path)
 
-        # Build (strategy, window) -> baseline OOS PF lookup
+        # Convert W-prefixed window labels to integers to match window_pairs
+        bp['window_i'] = bp['window'].astype(str).str.replace('W', '').astype(int)
+
+        # Build (strategy, window_i) -> baseline OOS PF lookup
         wp_dict = {
             (row['strategy'], row['window_i']): row['baseline_oos_pf']
             for _, row in wp.iterrows()
         }
 
         bp['oos_profitable'] = bp.apply(
-            lambda r: 1 if wp_dict.get((r['strategy'], r['window']), 0) > 1.0 else 0,
+            lambda r: 1 if wp_dict.get((r['strategy'], r['window_i']), 0) > 1.0 else 0,
             axis=1,
         )
         bp_matched = bp[bp.apply(
-            lambda r: (r['strategy'], r['window']) in wp_dict, axis=1
+            lambda r: (r['strategy'], r['window_i']) in wp_dict, axis=1
         )].copy()
 
         n_strats = bp_matched['strategy'].nunique()

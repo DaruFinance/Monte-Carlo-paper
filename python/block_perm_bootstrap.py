@@ -44,6 +44,7 @@ N_BOOT = 10000
 
 
 def load_and_aggregate():
+    """Load block-permutation and window-pair CSVs, aggregate into per-window clusters."""
     print("Loading and pre-aggregating by cluster...")
     cluster_data = []
     for asset, info in ASSETS_INFO.items():
@@ -55,16 +56,18 @@ def load_and_aggregate():
 
         bp = pd.read_csv(bp_path)
         wp = pd.read_csv(wp_path)
+        # Convert W-prefixed window labels to integers to match window_pairs
+        bp['window_i'] = bp['window'].astype(str).str.replace('W', '').astype(int)
         wp_dict = {
             (row['strategy'], row['window_i']): row['baseline_oos_pf']
             for _, row in wp.iterrows()
         }
         bp['oos_prof'] = bp.apply(
-            lambda r: 1 if wp_dict.get((r['strategy'], r['window']), 0) > 1.0 else 0,
+            lambda r: 1 if wp_dict.get((r['strategy'], r['window_i']), 0) > 1.0 else 0,
             axis=1,
         )
         bp = bp[bp.apply(
-            lambda r: (r['strategy'], r['window']) in wp_dict, axis=1
+            lambda r: (r['strategy'], r['window_i']) in wp_dict, axis=1
         )].copy()
 
         for w, grp in bp.groupby('window'):
@@ -84,6 +87,7 @@ def load_and_aggregate():
 
 
 def bootstrap_batch(args):
+    """Run one batch of cluster-bootstrap resamples and return per-method lift estimates."""
     cluster_data, n_clusters, batch_size, seed = args
     rng = np.random.RandomState(seed)
     results = []
