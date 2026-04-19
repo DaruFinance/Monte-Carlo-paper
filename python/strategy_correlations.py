@@ -52,6 +52,7 @@ FAMILY_PREFIXES = ['ATR', 'EMA', 'SMA', 'PPO', 'RSI_LEVEL',
 
 
 def get_family(name):
+    """Return the indicator family prefix for a strategy name."""
     for p in sorted(FAMILY_PREFIXES, key=len, reverse=True):
         if name.upper().startswith(p):
             return p
@@ -59,6 +60,7 @@ def get_family(name):
 
 
 def process_asset(asset, info):
+    """Compute within-family and cross-family OOS PF correlations for one asset."""
     wp_path = RAW / info['wp']
     if not wp_path.exists():
         print(f"  {asset}: missing {wp_path}")
@@ -109,6 +111,12 @@ def process_asset(asset, info):
     within = np.array(within)
     cross = np.array(cross)
 
+    # Absolute correlation statistics (|r|)
+    within_abs = np.abs(within) if len(within) else np.array([])
+    cross_abs = np.abs(cross) if len(cross) else np.array([])
+    # Null baseline: E[|r|] = sqrt(2 / (pi * n)) for independent series
+    null_abs_r = np.sqrt(2.0 / (np.pi * n_windows)) if n_windows > 0 else np.nan
+
     return {
         'asset': asset,
         'n_strategies': n_strats,
@@ -126,10 +134,16 @@ def process_asset(asset, info):
             (within > 0.7).mean() * 100 if len(within) else 0,
         'pct_cross_above_07':
             (cross > 0.7).mean() * 100 if len(cross) else 0,
+        'mean_within_abs_corr':
+            within_abs.mean() if len(within_abs) else np.nan,
+        'mean_cross_abs_corr':
+            cross_abs.mean() if len(cross_abs) else np.nan,
+        'null_expected_abs_r': null_abs_r,
     }
 
 
 def main():
+    """Process all assets and produce the cross-instrument correlation summary figure and CSV."""
     print(f"Output: {FIGS}/")
     stats_rows = []
     for asset, info in ASSETS.items():
@@ -148,28 +162,38 @@ def main():
               'pct_within_above_07', 'pct_cross_above_07']].to_string(
         index=False, float_format='%.3f'))
 
+    print("\nABSOLUTE CORRELATION |r| STATISTICS:")
+    print(df[['asset', 'mean_within_abs_corr', 'mean_cross_abs_corr',
+              'null_expected_abs_r']].to_string(
+        index=False, float_format='%.4f'))
+
     out_csv = TABLES / 'strategy_oos_summary.csv'
     df.to_csv(out_csv, index=False)
     print(f"\nSaved {out_csv}")
 
-    # 3x3 grid: within vs cross family correlation per instrument.
+    # 3x3 grid: within vs cross family ABSOLUTE correlation per instrument.
     fig, axes = plt.subplots(3, 3, figsize=(18, 15))
     for idx, s in enumerate(stats_rows):
         ax = axes[idx // 3][idx % 3]
+        w_val = s['mean_within_abs_corr']
+        c_val = s['mean_cross_abs_corr']
+        null_val = s['null_expected_abs_r']
         ax.bar(['Within\nFamily', 'Cross\nFamily'],
-               [s['mean_within_family_corr'], s['mean_cross_family_corr']],
+               [w_val, c_val],
                color=['#e74c3c', '#3498db'], alpha=0.8)
-        ax.set_ylim(-0.2, 1.0)
-        ax.set_ylabel('Mean Correlation')
+        ax.set_ylim(0, 0.15)
+        ax.set_ylabel(r'Mean $|\rho|$')
         ax.set_title(f"{s['asset']} "
                      f"({s['n_strategies']:,} strats, {s['n_windows']}W)")
-        ax.axhline(0, color='gray', linewidth=0.5)
+        ax.axhline(null_val, color='green', linewidth=1.2, linestyle='--',
+                   label=f'Null $E[|\\rho|]$ = {null_val:.4f}')
+        ax.legend(fontsize=7, loc='upper right')
         ax.grid(axis='y', alpha=0.3)
-        ax.text(0, s['mean_within_family_corr'] + 0.03,
-                f"{s['mean_within_family_corr']:.3f}",
+        ax.text(0, w_val + 0.004,
+                f"{w_val:.3f}",
                 ha='center', fontsize=10, fontweight='bold')
-        ax.text(1, s['mean_cross_family_corr'] + 0.03,
-                f"{s['mean_cross_family_corr']:.3f}",
+        ax.text(1, c_val + 0.004,
+                f"{c_val:.3f}",
                 ha='center', fontsize=10, fontweight='bold')
 
     # Hide unused axes if fewer than 9 instruments processed.
@@ -177,7 +201,7 @@ def main():
         axes[idx // 3][idx % 3].set_visible(False)
 
     plt.suptitle(
-        'Within-Family vs Cross-Family Strategy Correlation (OOS PF)',
+        r'Within-Family vs Cross-Family Absolute Strategy Correlation $|\rho|$ (OOS PF)',
         fontsize=14, y=1.01)
     plt.tight_layout()
     out_fig = FIGS / 'fig_strategy_correlations.pdf'

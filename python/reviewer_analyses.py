@@ -30,6 +30,7 @@ ASSETS = ['BTC', 'DOGE', 'BNB', 'SOL']
 
 
 def load_merged():
+    """Load and merge MC rank data with window-pair data for all assets."""
     merged = {}
     for a in ASSETS:
         mc = pd.read_csv(RAW / f'{a.lower()}_mc_perwindow.csv')
@@ -101,6 +102,7 @@ def analysis_matched_pool_placebo(merged, n_placebo=1000, seed=42):
 
 
 def analysis_cost_sensitivity(merged):
+    """Assess MC-filter lift stability under higher transaction costs and IS PF threshold sweeps."""
     print("\n" + "=" * 70)
     print("ANALYSIS 2: Transaction cost sensitivity")
     print("=" * 70)

@@ -4,9 +4,8 @@ synthetic_scenarios.py
 
 Regenerates the six orphaned "synthetic" reference CSVs cited in
 paper_redacted.tex. The original producer scripts were lost; this file
-reconstructs the data-generating process (DGP) and pipeline from
-``synthetic_pipeline_v4.py`` (preserved at
-``/mnt/d/PhD_Research/synthetic_pipeline_v4.py``) and writes fresh outputs
+reconstructs the data-generating process (DGP) and pipeline
+(adapted from the original synthetic pipeline) and writes fresh outputs
 with fixed seeds so reruns are deterministic.
 
 Tables produced (output dir = ``$MC_PAPER_DATA/results/tables[_v2]``)
@@ -61,7 +60,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import sys
 import time
 import warnings
 from pathlib import Path
@@ -183,6 +181,7 @@ def generate_prices(n_bars: int, momentum: float, drift: float, seed: int):
 # Strategies
 # ----------------------------------------------------------------------
 def compute_ema(prices, period):
+    """Compute exponential moving average for the given period."""
     alpha = 2.0 / (period + 1)
     ema = np.empty_like(prices)
     ema[0] = prices[0]
@@ -192,6 +191,7 @@ def compute_ema(prices, period):
 
 
 def compute_sma(prices, period):
+    """Compute simple moving average for the given period."""
     cs = np.cumsum(prices)
     sma = np.full_like(prices, np.nan)
     sma[period - 1] = cs[period - 1] / period
@@ -200,6 +200,7 @@ def compute_sma(prices, period):
 
 
 def compute_rsi(prices, period):
+    """Compute relative strength index for the given period."""
     deltas = np.diff(prices, prepend=prices[0])
     gains = np.where(deltas > 0, deltas, 0.0)
     losses = np.where(deltas < 0, -deltas, 0.0)
@@ -251,6 +252,7 @@ def build_strategies(n_target: int, seed: int = 0):
 
 
 def gen_signal(prices, strat):
+    """Generate a position signal array from prices using the given strategy."""
     n = len(prices)
     sig = np.zeros(n)
     t = strat["type"]
@@ -291,6 +293,7 @@ def gen_signal(prices, strat):
 
 
 def extract_trades(pos, br, cost=COST_PER_TRADE):
+    """Extract per-trade PnL array from a position signal and bar returns."""
     if len(br) < 2:
         return np.array([])
     pos = pos[: len(br) + 1]
@@ -310,6 +313,7 @@ def extract_trades(pos, br, cost=COST_PER_TRADE):
 
 
 def metrics(pnls):
+    """Compute ROI, profit factor, max drawdown, and Calmar ratio from trade PnLs."""
     if len(pnls) < 3:
         return dict(roi=0, pf=0, n=len(pnls), mdd=999.0, calmar=0.0)
     roi = pnls.sum()

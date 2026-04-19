@@ -38,7 +38,6 @@ from pathlib import Path
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
 import numpy as np
 import pandas as pd
 import seaborn as sns
@@ -87,6 +86,7 @@ FOREX_LABELS = {
 
 
 def savefig(fig, name):
+    """Save figure as 300-dpi PDF to the output directory and close it."""
     path = OUT / name
     fig.savefig(path, dpi=300, bbox_inches='tight', facecolor='white')
     plt.close(fig)
@@ -96,6 +96,7 @@ def savefig(fig, name):
 # Forex/commodity MC CSVs use strategy names that may contain commas — the
 # pipeline emits them without quoting. Parse with a window-regex split.
 def read_mc_perwindow(filepath):
+    """Parse a per-window MC CSV whose strategy names may contain commas."""
     rows = []
     with open(filepath) as f:
         _ = f.readline()
@@ -125,6 +126,7 @@ def read_mc_perwindow(filepath):
 
 
 def load_forex_data():
+    """Load and merge MC per-window and window-pair CSVs for all forex assets."""
     merged = {}
     for a in FOREX_ASSETS:
         mc_path = RAW / f'{a.lower()}_mc_perwindow.csv'
@@ -146,6 +148,7 @@ def load_forex_data():
 
 
 def load_crypto_merged():
+    """Load and merge MC per-window and window-pair CSVs for all crypto assets."""
     merged = {}
     for a in CRYPTO_ASSETS:
         wp_path = RAW / f'{a.lower()}_window_pairs.csv'
@@ -172,6 +175,7 @@ def load_crypto_merged():
 #  Figure 2: window_level_mc_vs_oos.pdf (forex/commodity)
 # ---------------------------------------------------------------------------
 def figure_2():
+    """Produce Fig 2 (window_level_mc_vs_oos.pdf): per-window IS/OOS rates for forex/commodity."""
     print('\n=== Figure 2: Window-Level MC vs OOS (Forex/Commodity) ===')
     merged = load_forex_data()
     if not merged:
@@ -226,6 +230,7 @@ def figure_2():
 #  Figure 3: bootstrap lift distributions (crypto, MC-only)
 # ---------------------------------------------------------------------------
 def figure_3():
+    """Produce Fig 3 (fig_bootstrap_lift_distributions.pdf): MC-lift bootstrap for crypto."""
     print('\n=== Figure 3: Bootstrap Lift Distributions (MC Only) ===')
     crypto_merged = load_crypto_merged()
     if not crypto_merged:
@@ -350,6 +355,7 @@ def figure_3():
 #  Figure 4: regime robustness (crypto 2x2)
 # ---------------------------------------------------------------------------
 def figure_4():
+    """Produce Fig 4 (fig_regime_robustness.pdf): per-window MC ROI rank across crypto assets."""
     print('\n=== Figure 4: Regime Robustness (Crypto) ===')
     crypto_merged = load_crypto_merged()
     if not crypto_merged:
@@ -399,6 +405,7 @@ def figure_4():
 #  Synthetic helpers used by figures 5 and 6
 # ---------------------------------------------------------------------------
 def compute_path_metrics(rets):
+    """Compute ROI, max drawdown, Calmar, Sharpe, and profit factor from a returns matrix."""
     roi = rets.sum(axis=1)
     eq = np.cumsum(rets, axis=1)
     rm = np.maximum.accumulate(eq, axis=1)
@@ -415,6 +422,7 @@ def compute_path_metrics(rets):
 
 
 def mc_ranks_vectorized(is_rets, obs_metrics, n_mc=500, batch_size=500):
+    """Compute Monte Carlo percentile ranks for ROI, MDD, and Calmar in batches."""
     n = len(is_rets)
     rank_keys = ['roi', 'mdd', 'calmar']
     counts = {k: np.zeros(n) for k in rank_keys}
@@ -445,6 +453,7 @@ def rolling_mean_2d(arr, w):
 
 
 def filter_stats_synth(df, mask, baseline_oos, label):
+    """Return OOS profitability and lift stats for a filtered subset of synthetic data."""
     sub = df[mask]
     if len(sub) == 0:
         return None
@@ -718,6 +727,7 @@ def run_synthetic_v3():
 
 
 def figure_5(syn):
+    """Produce Fig 5 (fig_synthetic_mc_ranks.pdf): synthetic scenarios A/B/C rank distributions."""
     print('\n=== Figure 5: Synthetic MC Ranks ===')
     df_a = syn['df_a']
     baseline_oos = syn['baseline_oos_a']
@@ -825,6 +835,7 @@ def figure_5(syn):
 
 
 def figure_6(syn):
+    """Produce Fig 6 (fig_synthetic_mc_analysis.pdf): data-mining scenario and portfolio MC ranks."""
     print('\n=== Figure 6: Synthetic MC Analysis ===')
     df_a = syn['df_a']
     df_b = syn['df_b']
@@ -982,6 +993,7 @@ def _load_pipeline_tables():
 
 
 def figure_7():
+    """Produce Fig 7 (fig_synthetic_pipeline_v4.pdf): full-pipeline synthetic overview."""
     print('\n=== Figure 7: Synthetic Pipeline v4 Overview ===')
     loaded = _load_pipeline_tables()
     if loaded is None:
@@ -1135,6 +1147,7 @@ def figure_7():
 
 
 def figure_8():
+    """Produce Fig 8 (fig_synthetic_pipeline_detail.pdf): per-tier lift details."""
     print('\n=== Figure 8: Synthetic Pipeline v4 Detail ===')
     loaded = _load_pipeline_tables()
     if loaded is None:
@@ -1233,6 +1246,7 @@ def figure_8():
 #  Figures 9 & 10: forex/commodity MC distributions and binned OOS
 # ---------------------------------------------------------------------------
 def figure_9():
+    """Produce Fig 9 (mc_pct_rank_distributions.pdf): forex/commodity MC rank distributions."""
     print('\n=== Figure 9: MC Pct Rank Distributions (Forex/Commodity) ===')
     merged = load_forex_data()
     if not merged:
@@ -1267,6 +1281,7 @@ def figure_9():
 
 
 def figure_10():
+    """Produce Fig 10 (mc_roi_vs_next_oos_binned.pdf): binned MC ROI vs next-window OOS rate."""
     print('\n=== Figure 10: MC ROI vs Next OOS Binned (Forex/Commodity) ===')
     merged = load_forex_data()
     if not merged:

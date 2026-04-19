@@ -52,12 +52,14 @@ TEST_LABELS = {'ent': 'ENT', 'fee': 'FEE', 'sli': 'SLI', 'entind': 'ENT+IND'}
 
 
 def savetable(df, name):
+    """Save a DataFrame as CSV to the tables output directory."""
     path = TAB / name
     df.to_csv(path, index=False)
     print(f"  -> {path}")
 
 
 def load_merged():
+    """Load and merge MC rank data with window-pair data for all assets."""
     merged = {}
     for a in ASSETS:
         mc = pd.read_csv(RAW / f'{a.lower()}_mc_perwindow.csv')
@@ -265,7 +267,7 @@ def section_is_oos(merged):
 
 
 def section_fair_comparison(merged):
-    """Table 6: fair comparison with block-conditional baselines."""
+    """Fair comparison with block-conditional baselines (fair_comparison.csv)."""
     print("\n=== Fair Comparison (Block-Conditional) ===")
     mc_filters = [
         ('MC-ROI p50', 'roi_pct_rank', 50),
@@ -344,6 +346,7 @@ def section_mc_filter_pass_fail(merged):
 
 
 def section_headline(merged):
+    """Print headline statistics cited inline in the paper."""
     print("\n" + "=" * 60)
     print("HEADLINE STATS (cited inline in paper)")
     print("=" * 60)

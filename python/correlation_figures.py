@@ -241,14 +241,10 @@ def process_asset(args):
     full_corr = full_pivot.T.corr()
     full_families = [get_family(s) for s in full_corr.index]
 
-    fam_pair_corrs = {}
-    for i in range(len(full_corr)):
-        for j in range(i + 1, len(full_corr)):
-            val = full_corr.iloc[i, j]
-            if np.isnan(val):
-                continue
-            pair = tuple(sorted([full_families[i], full_families[j]]))
-            fam_pair_corrs.setdefault(pair, []).append(val)
+    # Absolute correlation statistics (|r|)
+    within_abs = np.abs(within_corrs) if len(within_corrs) > 0 else np.array([])
+    cross_abs = np.abs(cross_corrs) if len(cross_corrs) > 0 else np.array([])
+    null_abs_r = np.sqrt(2.0 / (np.pi * n_windows)) if n_windows > 0 else np.nan
 
     stats = {
         'asset': asset,
@@ -261,6 +257,9 @@ def process_asset(args):
         'median_cross_family_corr': np.median(cross_corrs) if len(cross_corrs) > 0 else np.nan,
         'pct_within_above_07': (within_corrs > 0.7).mean() * 100 if len(within_corrs) > 0 else 0,
         'pct_cross_above_07': (cross_corrs > 0.7).mean() * 100 if len(cross_corrs) > 0 else 0,
+        'mean_within_abs_corr': within_abs.mean() if len(within_abs) > 0 else np.nan,
+        'mean_cross_abs_corr': cross_abs.mean() if len(cross_abs) > 0 else np.nan,
+        'null_expected_abs_r': null_abs_r,
     }
     return stats
 
@@ -285,6 +284,10 @@ if __name__ == '__main__':
         print(df[['asset', 'n_strategies', 'n_windows', 'n_families',
                    'mean_within_family_corr', 'mean_cross_family_corr',
                    'pct_within_above_07', 'pct_cross_above_07']].to_string(index=False, float_format='%.3f'))
+
+        print(f"\nABSOLUTE CORRELATION |r| STATISTICS:")
+        print(df[['asset', 'mean_within_abs_corr', 'mean_cross_abs_corr',
+                   'null_expected_abs_r']].to_string(index=False, float_format='%.4f'))
 
         df.to_csv(TABDIR / 'correlation_summary.csv', index=False)
         print(f"\nSaved {TABDIR / 'correlation_summary.csv'}")
