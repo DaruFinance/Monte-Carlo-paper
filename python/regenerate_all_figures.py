@@ -93,8 +93,11 @@ def savefig(fig, name):
     print(f'  Saved: {path}')
 
 
-# Forex/commodity MC CSVs use strategy names that may contain commas — the
-# pipeline emits them without quoting. Parse with a window-regex split.
+# Forex/commodity MC CSVs use strategy names that may contain commas. Some
+# pipeline versions emit them bare; newer versions wrap them in double quotes
+# (standard CSV escaping). The window-regex split handles both — we strip any
+# surrounding quote characters so the merge with window-pairs (which pandas
+# already unquotes) succeeds on the strategy key.
 def read_mc_perwindow(filepath):
     """Parse a per-window MC CSV whose strategy names may contain commas."""
     rows = []
@@ -107,7 +110,7 @@ def read_mc_perwindow(filepath):
             m = re.search(r',W(\d+),', line)
             if not m:
                 continue
-            strategy = line[:m.start()]
+            strategy = line[:m.start()].strip('"')
             parts = line[m.start() + 1:].split(',')
             if len(parts) != 8:
                 continue
@@ -1281,39 +1284,70 @@ def figure_9():
 
 
 def figure_10():
-    """Produce Fig 10 (mc_roi_vs_next_oos_binned.pdf): binned MC ROI vs next-window OOS rate."""
-    print('\n=== Figure 10: MC ROI vs Next OOS Binned (Forex/Commodity) ===')
-    merged = load_forex_data()
-    if not merged:
-        return
+    """Produce Fig 10 (mc_roi_vs_next_oos_binned.pdf): per-window MC rank vs OOS profitability."""
+    print('\n=== Figure 10: Per-Window MC ROI vs OOS (Forex/Commodity) ===')
+
     fig, axes = plt.subplots(3, 2, figsize=(14, 15))
     axes_flat = axes.flatten()
+
     for idx, a in enumerate(FOREX_ASSETS):
-        if a not in merged:
-            continue
         ax = axes_flat[idx]
-        m = merged[a]
-        has_next = m['next_baseline_oos_pf'].notna()
-        m_v = m[has_next]
-        x = m_v['roi_pct_rank'].values
-        y = (m_v['next_baseline_oos_pf'] > 1.0).astype(float).values
-        bins_arr = np.linspace(0, 100, 21)
-        bin_centers = (bins_arr[:-1] + bins_arr[1:]) / 2
-        bin_rates = []
-        for lo, hi in zip(bins_arr[:-1], bins_arr[1:]):
-            sel = y[(x >= lo) & (x < hi)]
-            bin_rates.append(sel.mean() * 100 if len(sel) > 10 else np.nan)
-        ax.bar(bin_centers, bin_rates, width=4.5, color='steelblue', alpha=0.7)
-        ax.axhline(y=y.mean() * 100, color='red', linestyle='--',
-                   label=f'Baseline: {y.mean()*100:.1f}%')
-        ax.set_xlabel('MC ROI Percentile Rank')
-        ax.set_ylabel('Next OOS Profitability (%)')
-        ax.set_title(FOREX_LABELS[a])
-        ax.legend(fontsize=8)
-        ax.grid(axis='y', alpha=0.3)
+        mc_path = RAW / f'{a.lower()}_mc_perwindow.csv'
+        wp_path = RAW / f'{a.lower()}_window_pairs.csv'
+        if not mc_path.exists() or not wp_path.exists():
+            print(f'  WARNING: missing data for {a}')
+            continue
+
+        mc = pd.read_csv(mc_path)
+        if 'window' in mc.columns and mc['window'].dtype == object:
+            mc['window_i'] = mc['window'].str.replace('W', '').astype(int)
+        mc_win = mc.groupby('window_i')['roi_pct_rank'].mean().reset_index()
+        mc_win.columns = ['window_i', 'mean_mc_rank']
+
+        wp = pd.read_csv(wp_path)
+        wp['oos_profitable'] = (wp['baseline_oos_pf'] > 1.0).astype(float)
+        wp_win = wp.groupby('window_i')['oos_profitable'].mean().reset_index()
+        wp_win.columns = ['window_i', 'oos_rate']
+        wp_win['oos_rate'] *= 100
+
+        wm = pd.merge(mc_win, wp_win, on='window_i')
+        print(f'  {a}: {len(wm)} windows')
+
+        if len(wm) < 3:
+            ax.text(0.5, 0.5, 'Insufficient data', transform=ax.transAxes,
+                    ha='center', va='center')
+            ax.set_title(FOREX_LABELS[a], fontweight='bold')
+            continue
+
+        x = wm['mean_mc_rank'].values
+        y = wm['oos_rate'].values
+
+        ax.scatter(x, y, s=60, color=C_NAVY, alpha=0.7, edgecolors='white',
+                   linewidth=0.5, zorder=3)
+
+        z = np.polyfit(x, y, 1)
+        x_line = np.linspace(x.min(), x.max(), 100)
+        ax.plot(x_line, np.polyval(z, x_line), color=C_RED, lw=2,
+                ls='--', alpha=0.8)
+
+        r_val, _ = pearsonr(x, y)
+        ax.text(0.97, 0.05, f'$r$ = {r_val:.3f}\n$n$ = {len(wm)}',
+                transform=ax.transAxes, ha='right', va='bottom',
+                fontsize=9, fontweight='bold',
+                bbox=dict(boxstyle='round,pad=0.3', fc='white',
+                          ec=C_GRAY, alpha=0.8))
+
+        pad = max((y.max() - y.min()) * 0.15, 2)
+        ax.set_ylim(y.min() - pad, y.max() + pad)
+
+        ax.set_xlabel('Mean MC ROI Percentile Rank (%)')
+        ax.set_ylabel('OOS Profitability Rate (%)')
+        ax.set_title(FOREX_LABELS[a], fontweight='bold')
+        ax.grid(alpha=0.2)
+
     axes_flat[-1].set_visible(False)
     plt.suptitle(
-        'MC ROI Percentile Rank vs Next-Window OOS Profitability Rate '
+        'Per-Window Mean MC ROI Rank vs OOS Profitability Rate '
         '(Forex/Commodity)', fontsize=13)
     plt.tight_layout()
     savefig(fig, 'mc_roi_vs_next_oos_binned.pdf')
