@@ -219,6 +219,21 @@ Bootstrap confidence intervals use 10,000 resamples. Figure and table
 outputs should match the paper byte-for-byte (figures) or
 digit-for-digit (tables) given the same inputs.
 
+### Data vintage caveat (forex/commodity figures)
+
+The forex/commodity `*_mc_perwindow.csv` inputs were rerun on **Apr 13
+2026**, after Figures 2 and 9 were baked into the paper from a Mar 27
+2026 snapshot. If you regenerate those two figures from the current
+`results/raw_data/`, numerical values (e.g. mean MC-ROI rank per
+instrument) will differ from the numbers quoted in the paper text,
+though the qualitative finding is the same. The exact PDFs from the
+paper are preserved under
+[`results/figures/paper_snapshot/`](results/figures/paper_snapshot/)
+so readers can visually verify the paper's values and md5-check their
+own raw_data against the Apr 13 vintage. Figure 10 was re-rendered
+against the Apr 13 data on Apr 20 and is consistent with the current
+pipeline.
+
 ## Citation
 
 If you use this code, please cite the accompanying paper (see
