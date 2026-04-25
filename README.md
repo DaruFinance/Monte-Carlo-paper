@@ -2,8 +2,7 @@
 
 Code, data, and statistical replication materials accompanying the paper
 **"Monte Carlo Filter Evaluation in Walk-Forward Strategy Selection"**
-(`paper_redacted.pdf`, included at the repository root in the original
-submission).
+(available on SSRN: [abstract_id=6636018](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=6636018)).
 
 Every figure, table, and inline statistic reported in the paper can be
 reproduced from this directory alone — with one caveat: the original trading
@@ -236,8 +235,8 @@ pipeline.
 
 ## Citation
 
-If you use this code, please cite the accompanying paper (see
-`paper_redacted.pdf` for full metadata).
+If you use this code, please cite the accompanying paper, available on
+SSRN: [abstract_id=6636018](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=6636018).
 
 ## License
 
