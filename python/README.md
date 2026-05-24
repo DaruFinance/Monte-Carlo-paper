@@ -1,50 +1,83 @@
 # Python analysis scripts
 
-Cleaned Python scripts that reproduce every figure, table, and inline
-statistic in the paper.
+Scripts that reproduce every figure, table, and inline statistic in the paper.
 
-## Layout / paths
+## Paths
 
-Every script resolves paths relative to the project root:
+Every script resolves locations relative to the project root:
 
-    ROOT = Path(os.environ["MC_PAPER_DATA"])       # if set
-         | Path(__file__).resolve().parents[1]     # else Scripts_Clean/
+```python
+ROOT = Path(os.environ["MC_PAPER_DATA"])     # if set
+     | Path(__file__).resolve().parents[1]   # else, the repo root
 
-    <ROOT>/results/raw_data/   # per-asset CSVs (inputs)
-    <ROOT>/results/figures/    # PDF outputs
-    <ROOT>/results/tables/     # CSV outputs
+<ROOT>/results/raw_data/   # per-asset CSVs (inputs, user-supplied)
+<ROOT>/results/figures/    # PDF outputs
+<ROOT>/results/tables/     # CSV / JSON / TeX outputs
+```
 
-Set `MC_PAPER_DATA` to the directory containing `results/` if you run
-from a different location.
+Set `MC_PAPER_DATA` if you run the scripts from a directory other than the
+repo root, or want to point them at an out-of-tree data directory.
 
 ## Dependencies
 
-    numpy pandas scipy matplotlib seaborn
+```
+numpy pandas scipy matplotlib seaborn
+```
 
-All RNG-using code is seeded (seed 42) for deterministic output.
+All stochastic code is seeded (`np.random.seed(42)` or explicit
+`RandomState`); bootstrap workers use fixed base seeds.
+
+## Inputs expected in `results/raw_data/`
+
+Each script reads a subset of the following files. Each is a flat CSV
+keyed by `(strategy, window)`; the strategies are user-supplied (see the
+strategy backtester at
+<https://github.com/DaruFinance/quant-research-framework-rs>).
+
+| File | Produced by | Schema (key columns) |
+|---|---|---|
+| `<asset>_corrected_ranks.csv` | `rust/mc_path_ranks` | `strategy, window, n_trades, actual_roi, actual_mdd, actual_calmar, actual_ulcer, roi_rank_broken, mdd_rank, calmar_rank, ulcer_rank` |
+| `<asset>_window_pairs.csv` | upstream backtester | `strategy, window_i, is_*, oos_*` plus robustness columns `ent_*, fee_*, sli_*, entind_*` |
+| `block_perm_path_<asset>.csv` | `rust/block_perm_path` | `strategy, window, n_trades, iid_mdd_rank, block{2,3,5,10,20}_mdd_rank` |
+| `<asset>_portfolio_mc_path.csv` | `rust/portfolio_mc_path` | `asset, window, port_id, n_strats, n_trades, port_mdd_rank, port_calmar_rank` |
+| `<asset>_portfolio_mc_oos.csv` | `rust/portfolio_mc_oos` | as above + `oos_*` outcome columns |
+
+Per the paper's Data Availability, none of these are bundled with the
+repo; populate them from your own bar data via the public backtester or
+from any pipeline conforming to the documented schema.
 
 ## Scripts
 
-| Script | Purpose | Inputs (from `results/raw_data/`) | Outputs | Paper targets |
-|---|---|---|---|---|
-| `regenerate_all_figures.py` | Master figure producer | `<asset>_window_pairs.csv`, `<asset>_mc_perwindow.csv` (all 9) | `results/figures/*.pdf` (9 figs) | Figs 2, 3, 4, 5, 6, 7, 8, 9, 10 |
-| `strategy_correlations.py` | Cross-asset correlation summary (Table 3 CSV) | `<asset>_window_pairs.csv` (all 9) | `strategy_oos_summary.csv`, `fig_strategy_correlations.pdf` | Fig 1 summary, Table 3 (`tab:corr_summary`) |
-| `correlation_figures.py` | Per-asset heatmaps + within/cross-family distributions | `<asset>_window_pairs.csv` (all 9) | `<asset>_family_corr.pdf`, `<asset>_strategy_corr.pdf`, `<asset>_corr_distribution.pdf`, `all_assets_corr_summary.pdf`, `correlation_summary.csv` | Fig 1 per-asset panels (`fig:strategy_correlations`) |
-| `full_analysis.py` | Crypto empirical analysis (rank, filters, MC correlations) | `<asset>_mc_perwindow.csv`, `<asset>_window_pairs.csv` (4 crypto) | `mc_pct_rank_summary.csv`, `all_filters_comparison.csv`, `filter_ranking_summary.csv`, `mc_correlations.csv`, `mc_filter_pass_fail.csv`, `fair_comparison.csv`, `is_oos_correlation_by_filter.csv`, `mc_filter_vs_next_oos.csv` | Table 4, Table 5, Table 6 headline, Table 7, Table 10 derivatives, pass/fail |
-| `crypto_stratified_analysis.py` | Stratified per-family / per-asset MC analysis | crypto `<asset>_mc_perwindow.csv`, `<asset>_window_pairs.csv` | `continuous_sharpe.csv`, `mc_by_family.csv`, `mc_selection_bias.csv`, `pf_stratified_crypto.csv` | Table 6, Table 8, Table 17, Table 18 |
-| `block_perm_analysis.py` | Per-asset block-permutation lift | `block_perm_<asset>.csv`, `<asset>_window_pairs.csv` | `block_perm_per_asset.csv` | Table 19 breakdown |
-| `block_perm_bootstrap.py` | Window-cluster bootstrap CIs | same as above | `block_perm_window_cluster_ci.csv` | Table 19 (`tab:block_perm_window_cluster_ci`) |
-| `calendar_cluster_bootstrap.py` | Calendar-quarter cluster bootstrap (10k resamples) | crypto + fx/commodity window_pairs + mc_perwindow | `empirical_bootstrap_ci.csv` | Table 15 calendar-cluster row, Fig 3 annotations |
-| `portfolio_mc_analysis.py` | Streaming portfolio-level MC | `<asset>_portfolio_mc.csv`, `<asset>_mc_perwindow.csv` (4 crypto) | `portfolio_mc_summary.csv`, `strat_vs_portfolio_mc.csv` | Table 14 |
-| `reviewer_analyses.py` | Matched-pool placebo + cost sensitivity | crypto window_pairs + mc_perwindow | `matched_pool_placebo.csv`, `cost_sensitivity_two_levels.csv`, `cost_sensitivity_pf_sweep.csv` | Table 10 placebo, Table 16 |
-| `synthetic_scenarios.py` | Synthetic scenario tables (pure-Python counterpart to Rust pipeline) | self-contained (seed 42) | `synthetic_a_filters.csv`, `synthetic_b_filters.csv`, `synthetic_c_portfolios.csv`, `synthetic_prevalence_sweep.csv`, `synthetic_filter_comparison.csv`, `synthetic_portfolio_results.csv` | Table synth-A, synth-B, synth-C, prevalence sweep |
+| Script | Purpose | Paper targets |
+|---|---|---|
+| `fp_pitfall_demo.py` | **Self-contained.** Reproduces the floating-point summation-order artefact that produces a spurious leftward shift in MC ranks for permutation-invariant statistics. | §8.4, Fig. `fp_bug_demonstration` |
+| `regenerate_all_figures.py` | Master figure producer; concatenates the per-figure builders. | Figs 3, 4, 5, 6, 7, 8, MC-rank distributions, portfolio right-shift, portfolio next-OOS deciles, cross-asset forest, family heatmap, cost sensitivity, gold MC, synthetic ground truth |
+| `strategy_correlations.py` | Within-family / cross-family correlation table from `corr_rs` output. | Table `family_corr` (§3.6) |
+| `correlation_figures.py` | Per-asset correlation panels (supporting material). | — |
+| `full_analysis.py` | Tables 4 (MC rank summary), 5 (filter ranking), 6 (filter ranking summary pooled), 7 (correlations), 15 (window-level bootstrap CI). | Tables 4, 5, 6, 7, 15 |
+| `crypto_stratified_analysis.py` | Tables 8 (MC by family), 17 (MC selection bias), 18 (PF-stratified MC). | Tables 8, 17, 18 |
+| `block_perm_analysis.py` | Table 19 from path-dependent block permutation. | Table 19 |
+| `block_perm_bootstrap.py` | Window-cluster bootstrap CIs on the block-perm lift. | Table 19 supplement |
+| `calendar_cluster_bootstrap.py` | Calendar-quarter cluster bootstrap (10k resamples). | Table 15 calendar row |
+| `portfolio_mc_analysis.py` | Tables 14 (portfolio MC), 14b/c/d (portfolio next-OOS), top-N portfolio MC. | Tables 14, 14b–d, top-N portfolio MC |
+| `reviewer_analyses.py` | Table 16 (cost sensitivity), matched-pool placebo, continuous Sharpe. | Table 16, placebo |
+| `synthetic_scenarios.py` | Synthetic A / B / CMP scenarios and signal sweep. | Tables 23, 24, 25 |
+| `gold_mc_analysis.py` | Per-asset gold-standard (bar-permutation, Aronson/Masters) MC + placebo. | §7.5, Fig `gold_mc` |
 
 ## Reproducibility
 
-- All stochastic code is seeded (`np.random.seed(42)` or explicit
-  `RandomState`). Bootstraps use fixed base seeds per worker.
-- Runtimes on a 16-core workstation:
-  - `regenerate_all_figures.py` ~5 min
-  - `calendar_cluster_bootstrap.py`, `block_perm_bootstrap.py` ~1-2 min
-  - `correlation_figures.py` ~2-3 min (9 assets, per-asset heatmaps)
-  - all other scripts: seconds
+- All RNG is seeded (`42`). Bootstraps use 10,000 resamples per estimate.
+- Per-strategy MC permutations use deterministic seeds derived from
+  `(strategy_index, window)`, so per-cell ranks are reproducible.
+- Lift estimates are stable across three independent seed sequences
+  (mean lift varies by less than 0.05 pp).
+- Tested with Python 3.12, NumPy 1.26, pandas 2.2, SciPy 1.13,
+  matplotlib 3.9.
+
+## Runtime guide (16-core workstation)
+
+- `fp_pitfall_demo.py`: ~30 s
+- `regenerate_all_figures.py`: ~5 min
+- `calendar_cluster_bootstrap.py`, `block_perm_bootstrap.py`: ~1–2 min
+- `correlation_figures.py`: ~2–3 min
+- all others: seconds

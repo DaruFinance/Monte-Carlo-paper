@@ -1,117 +1,99 @@
 # Monte Carlo Filter Evaluation — Reproducibility Package
 
-Code, data, and statistical replication materials accompanying the paper
-**"Monte Carlo Filter Evaluation in Walk-Forward Strategy Selection"**
-(available on SSRN: [abstract_id=6636018](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=6636018)).
+Analysis code accompanying the paper
 
-Every figure, table, and inline statistic reported in the paper can be
-reproduced from this directory alone — with one caveat: the original trading
-strategies themselves are **not** redistributed. Only the aggregated
-walk-forward output (MC ranks, window pairs, block-permutation results) is
-shipped. Anyone can reproduce every analytical step from those aggregates;
-only the initial backtesting stage is omitted.
+> **Predictive Value of Within-Strategy Permutation Tests for Forward Selection:**
+> *Evidence from Over 6 Billion Strategy-Level Permutations Across Three Asset Classes*
+> (Revised May 2026; SSRN [abstract_id=6636018](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=6636018))
 
-## Why three languages?
+The paper evaluates 437,911 strategy configurations across nine instruments
+(four crypto perpetuals, three forex pairs, two commodities) over 160
+walk-forward windows, with 6.63 billion within-strategy Monte Carlo
+permutations plus 19.9 billion block-permutation runs (~26.5 billion total).
+Three findings:
 
-- **Rust** (`rust/`) does the heavy lifting: block permutations across
-  billions of strategy-level resamples, the synthetic v4 pipeline, and the
-  strategy correlation tensor. Parallelised with Rayon.
-- **Python** (`python/`) orchestrates the analyses and produces every figure
-  and table that appears in the paper. NumPy / pandas / Matplotlib / SciPy.
-- **R** (`R/`) independently re-derives the key statistical claims (rank
-  means, bootstrap CIs, block-permutation lift, portfolio rank stats) so
-  that the numbers reported in the paper can be cross-validated against a
-  different implementation in a different language.
+1. The standard practitioner metrics — total ROI, trade-level Sharpe, and
+   Profit Factor — are permutation-invariant by construction under fixed
+   per-trade notional sizing. Their MC rank distributions are degenerate;
+   any non-trivial rank reported in vectorised implementations is a
+   floating-point summation-order artefact (see `python/fp_pitfall_demo.py`).
+2. For the genuinely path-dependent statistics (Maximum Drawdown, Calmar,
+   Ulcer index), realised trade ordering is statistically indistinguishable
+   from a random reshuffle and MC filtering adds at most a fraction of a
+   percentage point of out-of-sample profitability over a simple in-sample
+   profitability gate.
+3. At the portfolio level the MC test detects genuine path-dependence
+   (rightward shift of MDD ranks), but a forward test shows the signal
+   carries no positive predictive content.
 
-The R scripts are **not** used to produce any artifact in the paper — they
-exist purely as a methodological audit.
-
-## Directory layout
+## What is in this repository
 
 ```
-Scripts_Clean/
-├── README.md                ← this file
-├── LICENSE                  ← MIT
-├── .gitignore
-│
-├── python/                  ← 11 scripts + README, reproduces every figure/table
-├── rust/                    ← 3 crates + README (block_perm_rs, corr_rs, synthetic_pipeline_rust)
-├── R/                       ← 5 verification scripts + helpers + README
+.
+├── README.md           ← this file
+├── LICENSE             ← MIT
+├── python/             ← orchestrates all analyses; produces every figure and table
+├── rust/               ← seven Cargo crates for the parallelised stages
+├── R/                  ← independent cross-validation in a second language
 └── results/
-    ├── figures/             ← 10 PDF figures cited in paper
-    ├── tables/              ← 24 CSVs feeding paper tables
-    └── raw_data/            ← aggregated WFO output (9 assets), flat layout:
-                                <asset>_mc_perwindow.csv, <asset>_window_pairs.csv,
-                                <asset>_portfolio_mc.csv, block_perm_<asset>.csv
+    ├── figures/        ← PDF figures cited in the paper
+    ├── tables/         ← CSV / JSON / TeX tables feeding paper tables
+    └── raw_data/       ← left empty (.gitkeep); user-supplied (see below)
 ```
 
-Python scripts resolve paths relative to this directory (or via the
-`MC_PAPER_DATA` env var pointing at the project root). R scripts expect
-`MC_PAPER_DATA` to point directly at `results/raw_data/` (or rely on the
-default `../results/raw_data/` when invoked from `R/`).
+## What is NOT in this repository
 
-## Verification
+Per the paper's Data Availability section, this package consists of
+**analysis scripts only**. It does *not* contain:
 
-Two end-to-end spot-checks were performed after the cleanup:
+- The raw bar or trade data underlying the nine instruments.
+- The 437,911 strategy configurations and their parameterisations.
+- Pre-aggregated walk-forward output (`results/raw_data/` ships empty).
 
-1. **Figure 1** (`fig_strategy_correlations.pdf`): regenerated by the cleaned
-   `python/strategy_correlations.py` and rasterised at 150 dpi against the
-   canonical PDF from the paper — **pixel-perfect match** (0 differing
-   pixels at 2685×2279).
+Readers wishing to reproduce the empirical numerics need to apply the
+released scripts to their own bar-level data and their own strategy
+universe. The strategy backtester that produces the trade streams the MC
+pipeline consumes is open source and lives at
+<https://github.com/DaruFinance/quant-research-framework-rs>.
 
-2. **Bootstrap MC-filter lift** (Table 15 headline): the cleaned Python
-   `calendar_cluster_bootstrap.py` (pooled calendar-cluster bootstrap) and
-   the independent R `R/02_bootstrap_lift_ci.R` (per-asset window-cluster
-   bootstrap) agree to within 0.03 pp:
+## Quick start
 
-   | Source | Lift (pp) | 95% CI |
-   |---|---|---|
-   | Python `calendar_cluster_bootstrap.py` | −1.155 | [−1.279, −1.032] |
-   | R `02_bootstrap_lift_ci.R` (obs-weighted mean of 9 per-asset lifts) | ≈ −1.18 | — |
-
-   All 9 per-asset lifts returned by the R implementation are negative,
-   and 8/9 per-asset 95% CIs exclude zero (only XAU/USD is marginal),
-   matching the paper's headline direction and magnitude.
-
-## Quick start (with synthetic data)
-
-If you don't have the real aggregated data, you can generate synthetic
-sample data that matches all schemas so you can verify the pipeline runs
-end-to-end:
+### Reproduce the floating-point pitfall (no external data needed)
 
 ```bash
-# 0. Generate synthetic data (creates ~35 small CSVs in results/raw_data/)
-python generate_synthetic_data.py
-
-# If you have real data, the script backs up existing files to *.real.bak
-```
-
-The synthetic data is structurally correct but contains random values, so
-numerical results will not match the paper. Use it to verify that scripts
-execute without errors.
-
-## Quick start (with real data)
-
-```bash
-# 1. Python dependencies
-pip install numpy pandas matplotlib scipy seaborn
-
-# 2. Regenerate every figure and table in the paper
 cd python
-python regenerate_all_figures.py        # Figs 2-10
-python strategy_correlations.py         # Fig 1 summary + Table 3
-python correlation_figures.py           # Fig 1 per-asset panels (supplementary)
-python full_analysis.py                 # Tables 4, 5, 6 (headline), 7, 10 (derivs)
-python crypto_stratified_analysis.py    # Tables 6, 8, 17, 18
-python block_perm_analysis.py           # Table 19 breakdown
-python block_perm_bootstrap.py          # Table 19 window-cluster CI
-python calendar_cluster_bootstrap.py    # Table 15 / Fig 3 CIs
-python portfolio_mc_analysis.py         # Table 14
-python reviewer_analyses.py             # Tables 10 (placebo), 16
-python synthetic_scenarios.py           # Synthetic A/B/C tables + sweeps
+pip install numpy pandas matplotlib scipy seaborn
+python fp_pitfall_demo.py
+```
 
-# 3. (Optional) Cross-validate the statistics in R
-cd ../R
+This is self-contained and runs in under 30 seconds. It writes
+`fp_bug_evidence.csv` (a ledger of how often vectorised summation produces
+a strict `>` between two mathematically equal sums) and
+`fp_bug_demonstration.pdf` (publication figure).
+
+### Reproduce a paper table / figure on your own data
+
+Populate `results/raw_data/` with the per-asset CSVs documented in
+`python/README.md` and run the relevant producer:
+
+```bash
+export MC_PAPER_DATA=$(pwd)            # if not running from the repo root
+
+python python/full_analysis.py                # Tables 4, 5, 6, 7, 15 (corrected, MDD-based)
+python python/regenerate_all_figures.py       # All main-text figures
+python python/portfolio_mc_analysis.py        # Tables 14, 14b/c/d, top-N portfolio MC
+python python/block_perm_analysis.py          # Table 19 (path-dependent block permutation)
+python python/calendar_cluster_bootstrap.py   # Calendar-cluster bootstrap CIs
+python python/crypto_stratified_analysis.py   # Tables 8, 17, 18
+python python/reviewer_analyses.py            # Table 16 (cost-sensitivity), placebo, Sharpe
+python python/synthetic_scenarios.py          # Synthetic Tables 23 / 24 / 25
+python python/gold_mc_analysis.py             # Gold-standard bar-permutation MC
+```
+
+### Cross-validate in R (optional)
+
+```bash
+cd R
 Rscript 01_mc_rank_means.R
 Rscript 02_bootstrap_lift_ci.R
 Rscript 03_block_permutation.R
@@ -119,125 +101,113 @@ Rscript 04_strategy_correlations.R
 Rscript 05_portfolio_mc_ranks.R
 ```
 
-## How to reproduce every table and figure
+R scripts re-derive the headline rank means, bootstrap CIs, block-permutation
+lift, and portfolio rank statistics. They produce no paper artefacts; they
+exist purely as a cross-language methodological audit.
 
-Every numbered table and figure in the paper can be traced back to a
-single producer script below. Run the producer from `python/` (or the
-Rust crate from `rust/`) with `MC_PAPER_DATA` pointing at a directory
-containing `results/raw_data/`.
+## Why three languages
 
-### Figures
+- **Rust** (`rust/`) handles the computationally heavy stages: billions of
+  strategy-level resamples (`block_perm_rs`, `block_perm_path`), the
+  strategy-correlation tensor (`corr_rs`), the path-dependent MC ranks
+  (`mc_path_ranks`), portfolio-level MC and its forward-OOS variant
+  (`portfolio_mc_path`, `portfolio_mc_oos`), and the synthetic validation
+  pipeline (`synthetic_pipeline_rust`). All seven crates are parallelised
+  with Rayon.
+- **Python** (`python/`) orchestrates the analyses and produces every
+  figure and table. NumPy / pandas / Matplotlib / SciPy.
+- **R** (`R/`) is the cross-validation layer.
 
-| Fig | File | Producer |
+## Table / figure → producer map
+
+### Figures (all PDFs land in `results/figures/`)
+
+| Figure | File | Producer |
 |---|---|---|
-| 1 | `fig_strategy_correlations.pdf` | `python/strategy_correlations.py` (+ per-asset panels from `python/correlation_figures.py`) |
-| 2 | `window_level_mc_vs_oos.pdf` | `python/regenerate_all_figures.py` |
-| 3 | `fig_bootstrap_lift_distributions.pdf` | `python/calendar_cluster_bootstrap.py` + `regenerate_all_figures.py` |
-| 4 | `fig_regime_robustness.pdf` | `python/regenerate_all_figures.py` |
-| 5-8 | `fig_synthetic_*.pdf` | `rust/synthetic_pipeline_rust/` (+ `python/regenerate_all_figures.py`) |
-| 9 | `mc_pct_rank_distributions.pdf` | `python/regenerate_all_figures.py` |
-| 10 | `mc_roi_vs_next_oos_binned.pdf` | `python/regenerate_all_figures.py` |
+| 3   | `fig3_bootstrap_lift_corrected.pdf`, `fig3_bootstrap_lift_corrected_forex.pdf` | `python/regenerate_all_figures.py` |
+| 4   | `fig4_regime_robustness_corrected.pdf`, `fig4_regime_robustness_corrected_forex.pdf` | `python/regenerate_all_figures.py` |
+| 5   | `fig5_synthetic_mc_ranks_corrected.pdf` | `python/regenerate_all_figures.py` + `rust/synthetic_pipeline_rust/` |
+| 6   | `fig6_synthetic_edge_strat_corrected.pdf` | `python/regenerate_all_figures.py` |
+| 7   | `fig7_synthetic_tier_lift_corrected.pdf` | `python/regenerate_all_figures.py` |
+| 8   | `fig8_synthetic_signal_sweep_corrected.pdf` | `python/regenerate_all_figures.py` |
+| MC-rank distributions | `fig_mc_rank_distributions_corrected.pdf`, `..._forex.pdf` | `python/regenerate_all_figures.py` |
+| Portfolio MC right-shift (§6.2) | `fig_portfolio_mc_rightshift.pdf` | `python/regenerate_all_figures.py` |
+| Portfolio next-OOS deciles (§6.3) | `fig_portfolio_oos_decile.pdf` | `python/regenerate_all_figures.py` |
+| Cross-asset forest (§6.4) | `fig_crossasset_forest.pdf` | `python/regenerate_all_figures.py` |
+| Asset × family heatmap (§4) | `fig_mc_by_family_heatmap.pdf` | `python/regenerate_all_figures.py` |
+| Gold-standard MC (§7.5) | `fig_gold_mc.pdf` | `python/regenerate_all_figures.py` (+ `python/gold_mc_analysis.py`) |
+| Cost sensitivity (§7.4) | `fig_cost_sensitivity.pdf` | `python/regenerate_all_figures.py` |
+| Synthetic ground truth (App. A2) | `fig_synthetic_groundtruth_ranks.pdf` | `python/regenerate_all_figures.py` |
+| Floating-point pitfall (§8.4) | `fp_bug_demonstration.pdf` | `python/fp_pitfall_demo.py` |
 
-### Tables
+### Tables (CSV/JSON/TeX in `results/tables/`)
 
-| Table | CSV(s) | Producer |
+| Table | File(s) | Producer |
 |---|---|---|
-| 3 | `strategy_oos_summary.csv` | `python/strategy_correlations.py` |
-| 4 | `mc_pct_rank_summary.csv` | `python/full_analysis.py` |
-| 5 | `all_filters_comparison.csv` | `python/full_analysis.py` |
-| 6 (headline) | `filter_ranking_summary.csv` | `python/full_analysis.py` |
-| 6 (continuous) | `continuous_sharpe.csv` | `python/crypto_stratified_analysis.py` |
-| 7 | `mc_correlations.csv` | `python/full_analysis.py` |
-| 8 | `mc_by_family.csv` | `python/crypto_stratified_analysis.py` |
-| 10 (derivs) | `fair_comparison.csv` | `python/full_analysis.py` |
-| 10 (placebo) | `matched_pool_placebo.csv` | `python/reviewer_analyses.py` |
-| 14 | `portfolio_mc_summary.csv`, `strat_vs_portfolio_mc.csv` | `python/portfolio_mc_analysis.py` |
-| 15 | `empirical_bootstrap_ci.csv` | `python/calendar_cluster_bootstrap.py` |
-| 16 | `cost_sensitivity_two_levels.csv`, `cost_sensitivity_pf_sweep.csv` | `python/reviewer_analyses.py` |
-| 17 | `mc_selection_bias.csv` | `python/crypto_stratified_analysis.py` |
-| 18 | `pf_stratified_crypto.csv` | `python/crypto_stratified_analysis.py` |
-| 19 | `block_perm_per_asset.csv`, `block_perm_window_cluster_ci.csv` | `python/block_perm_analysis.py`, `python/block_perm_bootstrap.py` |
-| synth-A/B/C, prev sweep | `synthetic_{a,b,c,prevalence_sweep,filter_comparison,portfolio_results}.csv` | `python/synthetic_scenarios.py` |
-| synth v4 (Figs 5-8) | `synthetic_v4_*.csv` (+ `_matched.csv`) | `rust/synthetic_pipeline_rust/` |
+| family_corr (§3.6) | (via `corr_rs` Rust output) | `python/strategy_correlations.py` |
+| 4   (MC rank summary) | `table4_corrected.csv`, `table4_corrected.tex` | `python/full_analysis.py` |
+| 5   (filter ranking) | `table5_filters_comparison_corrected.csv` | `python/full_analysis.py` |
+| 6   (filter ranking summary, pooled) | `filter_ranking_summary_corrected.csv` | `python/full_analysis.py` |
+| 7   (MC rank ↔ OOS correlations) | `table7_correlations_corrected.csv` | `python/full_analysis.py` |
+| 8   (MC by indicator family) | `table8_mc_by_family_corrected.csv` | `python/crypto_stratified_analysis.py` |
+| 14  (portfolio MC) | `table14_portfolio_mc_corrected.csv` | `python/portfolio_mc_analysis.py` |
+| 14b/c/d (portfolio next-OOS) | `table14b_portfolio_oos_stratified_mc_*.csv`, `table14c_portfolio_oos_topbottom.csv`, `table14d_portfolio_oos_stratified_pooled.csv` | `python/portfolio_mc_analysis.py` |
+| 15  (bootstrap CIs) | `table15_bootstrap_lift_corrected.csv`, `table15_calendar_cluster_bootstrap_corrected.csv` | `python/full_analysis.py`, `python/calendar_cluster_bootstrap.py` |
+| 16  (cost sensitivity) | `table16_cost_sensitivity_corrected.csv`, `table16_cost_sensitivity_corrected.tex` | `python/reviewer_analyses.py` |
+| 17  (MC selection bias) | `table17_mc_selection_bias_corrected.csv` | `python/crypto_stratified_analysis.py` |
+| 18  (PF-stratified MC) | `table18_pf_stratified_corrected.csv` | `python/crypto_stratified_analysis.py` |
+| 19  (block-permutation) | `table19_block_permutation_corrected.csv`, `table19_block_perm_filter_lift_corrected.csv` | `python/block_perm_analysis.py`, `python/block_perm_bootstrap.py` |
+| 23/24/25 (synthetic tiers, signal sweep) | `table23_..._corrected.csv`, `table24_..._corrected.csv`, `table25_..._corrected.csv` | `python/synthetic_scenarios.py` |
+| Gold-standard MC | `gold_mc_<asset>_agg.json` (×9), `gold_mc_placebo.json` | `python/gold_mc_analysis.py` |
+| Continuous Sharpe | `continuous_sharpe_corrected.csv` | `python/reviewer_analyses.py` |
+| Matched-pool placebo | `matched_pool_placebo_corrected.csv` | `python/reviewer_analyses.py` |
+| Top-N portfolio MC | `topn_portfolio_mc{,_summary,_floor30,_floor30_summary}.csv` | `python/portfolio_mc_analysis.py` |
+| Synthetic A/B/CMP | `synthetic_{a,b}_filters_corrected.csv`, `synthetic_filter_comparison_corrected.csv`, `synthetic_mc_rank_stats_corrected.csv` | `python/synthetic_scenarios.py` |
 
-R cross-validation outputs live under `R/out/` and are indexed in
+R cross-validation outputs land in `R/out/` and are indexed in
 `R/README.md`.
 
-## Rebuilding the aggregated data from scratch (Rust stage)
+## Regenerating the per-asset CSVs from scratch (Rust stage)
 
-The `results/raw_data/block_perm/` CSVs were produced by the Rust crate
-`rust/block_perm_rs/`. To regenerate them you need the underlying trades
-binary (not distributed here). The synthetic pipeline, in contrast, is
-fully self-contained:
+The path-dependent rank files (`<asset>_corrected_ranks.csv`,
+`block_perm_path_<asset>.csv`, `<asset>_portfolio_mc_path.csv`,
+`<asset>_portfolio_mc_oos.csv`) are produced by four new Rust crates that
+expect a backtester's `trades.bin` directory layout as input. The
+synthetic pipeline is fully self-contained:
 
 ```bash
 cd rust/synthetic_pipeline_rust
 cargo build --release
-cargo run --release -- ../../results/tables
+cargo run --release -- ../../results/raw_data/synthetic_v4
 ```
 
-See `rust/README.md` for per-crate instructions.
-
-## Large files
-
-Five raw-data files exceed GitHub's 100 MB single-file limit and are shipped
-as `.csv.INFO` stubs containing schema, row count, md5, and a first-rows
-sample:
-
-- `bnb_window_pairs.csv` (151 MB)
-- `btc_window_pairs.csv` (135 MB)
-- `doge_window_pairs.csv` (101 MB)
-- `bnb_portfolio_mc.csv` (211 MB)
-- `doge_portfolio_mc.csv` (151 MB)
-
-These can be regenerated from the strategy-level walk-forward output using
-`block_perm_rs` (for `*_window_pairs.csv`) or the portfolio Monte Carlo
-stage (for `*_portfolio_mc.csv`). The total size of the published
-`results/` tree is ~1.6 GB.
-
-## What is NOT included
-
-- **Strategy source code, strategy names, and raw trade files.** The paper
-  studies filter behaviour on aggregated walk-forward output; the strategies
-  themselves are proprietary and are not required for any analysis here.
-- **`block_bootstrap_results.csv`** (5.5 GB intermediate artifact, not cited
-  in the paper).
-- **Intermediate logs and `.bak` files.**
-- **Rust `target/` build directories.**
-
-The only traces of individual strategies that remain anywhere in this
-package are anonymous integer IDs and the generic technical-indicator
-family names that classify each strategy (`ATR`, `EMA`, `MACD`, `PPO`,
-`RSI`, `RSI_LEVEL`, `SMA`, `STOCHK`).
+See `rust/README.md` for per-crate usage.
 
 ## Reproducibility
 
-All scripts use fixed random seeds (`42` throughout). The block permutation
-sweep (`b ∈ {1,2,3,5,10,20}`) is deterministic given the input CSVs.
-Bootstrap confidence intervals use 10,000 resamples. Figure and table
-outputs should match the paper byte-for-byte (figures) or
-digit-for-digit (tables) given the same inputs.
+All stochastic code uses a fixed seed (`42` throughout). Bootstraps use
+10,000 resamples. MC permutations use independent seeds per
+(strategy, window) so per-cell ranks are reproducible. The lift estimates
+are stable across three independent seed sequences (mean lift varies by
+less than 0.05 pp).
 
-### Data vintage caveat (forex/commodity figures)
-
-The forex/commodity `*_mc_perwindow.csv` inputs were rerun on **Apr 13
-2026**, after Figures 2 and 9 were baked into the paper from a Mar 27
-2026 snapshot. If you regenerate those two figures from the current
-`results/raw_data/`, numerical values (e.g. mean MC-ROI rank per
-instrument) will differ from the numbers quoted in the paper text,
-though the qualitative finding is the same. The exact PDFs from the
-paper are preserved under
-[`results/figures/paper_snapshot/`](results/figures/paper_snapshot/)
-so readers can visually verify the paper's values and md5-check their
-own raw_data against the Apr 13 vintage. Figure 10 was re-rendered
-against the Apr 13 data on Apr 20 and is consistent with the current
-pipeline.
+Tested with Python 3.12, NumPy 1.26, pandas 2.2, SciPy 1.13,
+matplotlib 3.9, and Rust 1.94 (stable).
 
 ## Citation
 
-If you use this code, please cite the accompanying paper, available on
-SSRN: [abstract_id=6636018](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=6636018).
+```bibtex
+@unpublished{gatto2026mc,
+  author = {Gatto, Daniel V.},
+  title  = {Predictive Value of Within-Strategy Permutation Tests for Forward Selection:
+            Evidence from Over 6 Billion Strategy-Level Permutations Across Three Asset Classes},
+  year   = {2026},
+  month  = {May},
+  note   = {Revised May 2026. SSRN Working Paper 6636018.},
+  url    = {https://papers.ssrn.com/sol3/papers.cfm?abstract_id=6636018}
+}
+```
 
 ## License
 
-MIT — see `LICENSE`.
+MIT — see [`LICENSE`](LICENSE).

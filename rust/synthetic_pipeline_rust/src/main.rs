@@ -21,7 +21,7 @@
 //! Input:  none — self-generates synthetic AR(1) + GARCH(1,1) + Student-t
 //!         returns with a two-state volatility regime.
 //!
-//! Output CSVs (in <output_dir>, default `../../results/tables_v2`):
+//! Output CSVs (in <output_dir>, default `../../results/raw_data/synthetic_v4`):
 //!   synthetic_v4_summaries_matched.csv
 //!   synthetic_v4_null_filters_matched.csv
 //!   synthetic_v4_edge_filters_matched.csv
@@ -94,7 +94,7 @@ const N_SIMS: usize = 8;
 const N_WORKERS_DEFAULT: usize = 32;
 
 // Output directory default. Overridable via CLI arg 1 or MC_PAPER_TBL_DIR env var.
-const DEFAULT_TBL_DIR: &str = "../../results/tables_v2";
+const DEFAULT_TBL_DIR: &str = "../../results/raw_data/synthetic_v4";
 
 fn resolve_tbl_dir() -> String {
     std::env::args()
@@ -148,6 +148,9 @@ struct Metrics {
 struct McRanks {
     roi: f64,
     sharpe: f64,
+    mdd: f64,     // path-dependent
+    calmar: f64,  // path-dependent
+    ulcer: f64,   // path-dependent
 }
 
 struct StratWindowResult {
@@ -158,6 +161,9 @@ struct StratWindowResult {
     oos_profitable: bool,
     mc_roi_rank: f64,
     mc_sharpe_rank: f64,
+    mc_mdd_rank: f64,    // path-dependent
+    mc_calmar_rank: f64, // path-dependent
+    mc_ulcer_rank: f64,  // path-dependent
     rob_fee_pass: bool,
     rob_slip_pass: bool,
     rob_all_pass: bool,
@@ -172,12 +178,19 @@ struct SimSummary {
     baseline_oos: f64,
     mc_roi_lift_p50: f64,
     mc_roi_lift_p75: f64,
+    mc_mdd_lift_p50: f64,
+    mc_mdd_lift_p75: f64,
+    mc_calmar_lift_p50: f64,
+    mc_ulcer_lift_p50: f64,
     rob_all_lift: f64,
     is_pf_lift: f64,
     port_nofilter_oos: f64,
     port_rob_oos: f64,
     corr_mc_roi_oos: f64,
     corr_mc_sharpe_oos: f64,
+    corr_mc_mdd_oos: f64,
+    corr_mc_calmar_oos: f64,
+    corr_mc_ulcer_oos: f64,
 }
 
 #[derive(Clone, Default, serde::Serialize)]
@@ -679,6 +692,9 @@ fn mc_percentile_ranks(trade_pnls: &[f64], n_mc: usize, rng: &mut StdRng) -> McR
         return McRanks {
             roi: 50.0,
             sharpe: 50.0,
+            mdd: 50.0,
+            calmar: 50.0,
+            ulcer: 50.0,
         };
     }
 
@@ -693,25 +709,36 @@ fn mc_percentile_ranks(trade_pnls: &[f64], n_mc: usize, rng: &mut StdRng) -> McR
         0.0
     };
 
-    let mut obs_mdd = 0.0f64;
-    {
+    // Observed path-dependent MDD + Ulcer
+    let (obs_mdd, obs_ulcer) = {
         let mut eq = 0.0f64;
         let mut peak = 0.0f64;
+        let mut mdd = 0.0f64;
+        let mut sumsq_dd = 0.0f64;
         for &pnl in trade_pnls {
             eq += pnl;
             if eq > peak {
                 peak = eq;
             }
             let dd = peak - eq;
-            if dd > obs_mdd {
-                obs_mdd = dd;
+            if dd > mdd {
+                mdd = dd;
             }
+            sumsq_dd += dd * dd;
         }
-    }
+        (mdd, (sumsq_dd / n as f64).sqrt())
+    };
+    let obs_calmar = if obs_mdd > 1e-10 {
+        obs_roi / obs_mdd
+    } else {
+        0.0
+    };
 
     let mut roi_count = 0u32;
     let mut sharpe_count = 0u32;
     let mut mdd_count = 0u32;
+    let mut calmar_count = 0u32;
+    let mut ulcer_count = 0u32;
 
     let mut shuffled = trade_pnls.to_vec();
 
@@ -736,10 +763,11 @@ fn mc_percentile_ranks(trade_pnls: &[f64], n_mc: usize, rng: &mut StdRng) -> McR
             0.0
         };
 
-        // MDD
+        // MDD + Ulcer for this permutation
         let mut seq = 0.0f64;
         let mut speak = 0.0f64;
         let mut smdd = 0.0f64;
+        let mut ssumsq_dd = 0.0f64;
         for &pnl in &shuffled {
             seq += pnl;
             if seq > speak {
@@ -749,7 +777,10 @@ fn mc_percentile_ranks(trade_pnls: &[f64], n_mc: usize, rng: &mut StdRng) -> McR
             if dd > smdd {
                 smdd = dd;
             }
+            ssumsq_dd += dd * dd;
         }
+        let s_ulcer = (ssumsq_dd / n as f64).sqrt();
+        let s_calmar = if smdd > 1e-10 { shuf_roi / smdd } else { 0.0 };
 
         if obs_roi > shuf_roi {
             roi_count += 1;
@@ -757,14 +788,26 @@ fn mc_percentile_ranks(trade_pnls: &[f64], n_mc: usize, rng: &mut StdRng) -> McR
         if obs_sharpe > shuf_sharpe {
             sharpe_count += 1;
         }
+        // MDD/Ulcer: lower is better → rank = count(actual < perm)
         if obs_mdd < smdd {
             mdd_count += 1;
         }
+        if obs_ulcer < s_ulcer {
+            ulcer_count += 1;
+        }
+        // Calmar: higher is better → rank = count(perm < actual)
+        if s_calmar < obs_calmar {
+            calmar_count += 1;
+        }
     }
 
+    let f = 100.0 / n_mc as f64;
     McRanks {
-        roi: roi_count as f64 / n_mc as f64 * 100.0,
-        sharpe: sharpe_count as f64 / n_mc as f64 * 100.0,
+        roi: roi_count as f64 * f,
+        sharpe: sharpe_count as f64 * f,
+        mdd: mdd_count as f64 * f,
+        calmar: calmar_count as f64 * f,
+        ulcer: ulcer_count as f64 * f,
     }
 }
 
@@ -839,6 +882,9 @@ fn run_pipeline(
                     McRanks {
                         roi: 50.0,
                         sharpe: 50.0,
+                        mdd: 50.0,
+                        calmar: 50.0,
+                        ulcer: 50.0,
                     }
                 };
 
@@ -851,6 +897,9 @@ fn run_pipeline(
                     oos_profitable: oos_m.pf > 1.0,
                     mc_roi_rank: mc_ranks.roi,
                     mc_sharpe_rank: mc_ranks.sharpe,
+                    mc_mdd_rank: mc_ranks.mdd,
+                    mc_calmar_rank: mc_ranks.calmar,
+                    mc_ulcer_rank: mc_ranks.ulcer,
                     rob_fee_pass: is_pf_pass && fee_m.pf > 1.0,
                     rob_slip_pass: is_pf_pass && slip_m.pf > 1.0,
                     rob_all_pass: is_pf_pass && fee_m.pf > 1.0 && slip_m.pf > 1.0,
@@ -941,6 +990,35 @@ fn compute_filter_results(results: &[StratWindowResult]) -> (Vec<FilterRow>, f64
         FilterDef {
             name: "MC-ROI p75 + PF>1",
             pred: Box::new(|r| r.mc_roi_rank >= 75.0 && r.is_pf_pass),
+        },
+        // Path-dependent filters (corrected; the informative null)
+        FilterDef {
+            name: "MC-MDD >= p50",
+            pred: Box::new(|r| r.mc_mdd_rank >= 50.0),
+        },
+        FilterDef {
+            name: "MC-MDD >= p75",
+            pred: Box::new(|r| r.mc_mdd_rank >= 75.0),
+        },
+        FilterDef {
+            name: "MC-Calmar >= p50",
+            pred: Box::new(|r| r.mc_calmar_rank >= 50.0),
+        },
+        FilterDef {
+            name: "MC-Calmar >= p75",
+            pred: Box::new(|r| r.mc_calmar_rank >= 75.0),
+        },
+        FilterDef {
+            name: "MC-Ulcer >= p50",
+            pred: Box::new(|r| r.mc_ulcer_rank >= 50.0),
+        },
+        FilterDef {
+            name: "MC-MDD p50 + PF>1",
+            pred: Box::new(|r| r.mc_mdd_rank >= 50.0 && r.is_pf_pass),
+        },
+        FilterDef {
+            name: "MC-Calmar p50 + PF>1",
+            pred: Box::new(|r| r.mc_calmar_rank >= 50.0 && r.is_pf_pass),
         },
     ];
 
@@ -1099,6 +1177,9 @@ fn run_single_sim(
     let valid: Vec<&StratWindowResult> = results.iter().filter(|r| r.is_n_trades >= 3).collect();
     let mc_roi_ranks: Vec<f64> = valid.iter().map(|r| r.mc_roi_rank).collect();
     let mc_sharpe_ranks: Vec<f64> = valid.iter().map(|r| r.mc_sharpe_rank).collect();
+    let mc_mdd_ranks: Vec<f64> = valid.iter().map(|r| r.mc_mdd_rank).collect();
+    let mc_calmar_ranks: Vec<f64> = valid.iter().map(|r| r.mc_calmar_rank).collect();
+    let mc_ulcer_ranks: Vec<f64> = valid.iter().map(|r| r.mc_ulcer_rank).collect();
     let oos_profs: Vec<f64> = valid
         .iter()
         .map(|r| if r.oos_profitable { 1.0 } else { 0.0 })
@@ -1111,12 +1192,19 @@ fn run_single_sim(
         baseline_oos: baseline,
         mc_roi_lift_p50: get_lift("MC-ROI >= p50"),
         mc_roi_lift_p75: get_lift("MC-ROI >= p75"),
+        mc_mdd_lift_p50: get_lift("MC-MDD >= p50"),
+        mc_mdd_lift_p75: get_lift("MC-MDD >= p75"),
+        mc_calmar_lift_p50: get_lift("MC-Calmar >= p50"),
+        mc_ulcer_lift_p50: get_lift("MC-Ulcer >= p50"),
         rob_all_lift: get_lift("Rob: All"),
         is_pf_lift: get_lift("IS PF > 1"),
         port_nofilter_oos,
         port_rob_oos,
         corr_mc_roi_oos: pearson_corr(&mc_roi_ranks, &oos_profs),
         corr_mc_sharpe_oos: pearson_corr(&mc_sharpe_ranks, &oos_profs),
+        corr_mc_mdd_oos: pearson_corr(&mc_mdd_ranks, &oos_profs),
+        corr_mc_calmar_oos: pearson_corr(&mc_calmar_ranks, &oos_profs),
+        corr_mc_ulcer_oos: pearson_corr(&mc_ulcer_ranks, &oos_profs),
     };
 
     (summary, filter_rows)
@@ -1230,6 +1318,14 @@ fn run_signal_sweep(strategies: &[Strategy]) -> Vec<SimSummary> {
                 .find(|r| r.filter == "MC-ROI >= p75")
                 .map(|r| r.lift_pp)
                 .unwrap_or(f64::NAN);
+            // Path-dependent lifts — added with the v0.3 MC-MDD/Calmar/Ulcer patch.
+            let lookup = |name: &str| filter_rows.iter()
+                .find(|r| r.filter == name)
+                .map(|r| r.lift_pp).unwrap_or(f64::NAN);
+            summary.mc_mdd_lift_p50    = lookup("MC-MDD >= p50");
+            summary.mc_mdd_lift_p75    = lookup("MC-MDD >= p75");
+            summary.mc_calmar_lift_p50 = lookup("MC-Calmar >= p50");
+            summary.mc_ulcer_lift_p50  = lookup("MC-Ulcer >= p50");
             summary.rob_all_lift = filter_rows
                 .iter()
                 .find(|r| r.filter == "Rob: All")

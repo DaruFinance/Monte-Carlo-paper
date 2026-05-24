@@ -1,0 +1,9 @@
+Filter,Median OOS Sharpe,Delta
+No filter,-0.098,0.0
+IS PF$>$1,-0.042,0.056
+MC-MDD p50,-0.096,0.002
+MC-Calmar p50,-0.098,0.0
+MC-Ulcer p50,-0.097,0.001
+MC-MDD p50 + IS PF$>$1,-0.04,0.058
+MC-Calmar p50 + IS PF$>$1,-0.04,0.058
+MC-ROI* p50 (artefactual),-0.087,0.01

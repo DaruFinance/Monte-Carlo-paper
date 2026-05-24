@@ -1,284 +1,187 @@
 """
-Calendar-period clustered bootstrap for the MC-ROI p50 lift estimate.
+Calendar-quarter cluster bootstrap CI on filter lift — corrected version.
 
-Each (asset, window) OOS period is assigned to a calendar-quarter cluster and
-the bootstrap resamples those clusters (rather than individual observations
-or asset-windows) to account for cross-asset dependence: crypto assets share
-overlapping calendar periods, as do forex/commodity assets.
+Paper's primary clustering choice (Section 7): each (asset, window) OOS period
+is assigned to a calendar quarter; clusters are resampled with replacement;
+filter lift is recomputed inside the resampled clusters; 95% CI from the
+bootstrap percentiles.
 
-This script generates:
-  - The point estimate and 95% CI for MC-ROI p50 lift reported in Table 15.
-  - The underlying distribution displayed in Figure 3
-    (fig_bootstrap_lift_distributions.pdf) — note the figure itself is built
-    by regenerate_all_figures.py; this script produces the CI numbers it
-    annotates.
+This version uses CORRECTED MC ranks (MDD/Calmar/Ulcer) and covers all 7
+instruments (4 crypto + 3 forex). Forex calendar dates use a linear-time
+approximation (forex weekend closures shift the actual dates by ~30%, but
+quarter-level clusters absorb this).
 
-Inputs (relative to project root):
-  - results/raw_data/block_perm_<asset>.csv    (Rust block-perm output)
-  - results/raw_data/<asset>_window_pairs.csv  (backtest pipeline)
-
-Outputs:
-  - results/tables/empirical_bootstrap_ci.csv
+Output: results/tables/table15_calendar_cluster_bootstrap_corrected.csv
 """
+from __future__ import annotations
 import os
 from datetime import datetime, timedelta
-from multiprocessing import Pool, cpu_count
 from pathlib import Path
-
 import numpy as np
 import pandas as pd
 
 ROOT = Path(os.environ.get("MC_PAPER_DATA", Path(__file__).resolve().parents[1]))
-RAW = ROOT / "results" / "raw_data"
-TABLES = ROOT / "results" / "tables"
-TABLES.mkdir(parents=True, exist_ok=True)
+DATA = ROOT / "results" / "raw_data"
+OUT = ROOT / "results" / "tables"
+OUT.mkdir(parents=True, exist_ok=True)
 
-ASSETS_INFO = {
-    'BTC':     {'csv': 'block_perm_btc.csv',    'wp': 'btc_window_pairs.csv'},
-    'DOGE':    {'csv': 'block_perm_doge.csv',   'wp': 'doge_window_pairs.csv'},
-    'BNB':     {'csv': 'block_perm_bnb.csv',    'wp': 'bnb_window_pairs.csv'},
-    'SOL':     {'csv': 'block_perm_sol.csv',    'wp': 'sol_window_pairs.csv'},
-    'EUR/USD': {'csv': 'block_perm_eurusd.csv', 'wp': 'eurusd_window_pairs.csv'},
-    'USD/JPY': {'csv': 'block_perm_usdjpy.csv', 'wp': 'usdjpy_window_pairs.csv'},
-    'EUR/GBP': {'csv': 'block_perm_eurgbp.csv', 'wp': 'eurgbp_window_pairs.csv'},
-    'XAU/USD': {'csv': 'block_perm_xauusd.csv', 'wp': 'xauusd_window_pairs.csv'},
-    'WTI':     {'csv': 'block_perm_wti.csv',    'wp': 'wti_window_pairs.csv'},
+N_BOOT = 10_000
+
+# Walk-forward protocol per paper (Section 3.1):
+#   IS = 10000 candles, advance = 5000 candles; crypto trades 24/7.
+# For forex (24/5) the linear-time calculation under-estimates calendar
+# duration by ~30% (forex is 120h/week vs crypto 168h/week). Quarter-
+# level clustering tolerates this; precise alignment would require
+# reading bar timestamps from the source CSV.
+CRYPTO_CONFIG = {
+    "BTC":     (datetime(2019, 12, 31), 30, 27, "btc"),
+    "DOGE":    (datetime(2020, 7, 10),  30, 21, "doge"),
+    "BNB":     (datetime(2020, 2, 10),  15, 30, "bnb"),
+    "SOL":     (datetime(2020, 9, 14),  60,  7, "sol"),
+    "EUR/USD": (datetime(2016, 3, 24),  60, 15, "eurusd"),
+    "USD/JPY": (datetime(2016, 3, 24),  60, 15, "usdjpy"),
+    "EUR/GBP": (datetime(2016, 3, 24),  60, 15, "eurgbp"),
+    "XAU/USD": (datetime(2006, 3, 20),  60, 15, "xauusd"),
+    "WTI":     (datetime(2010, 1,  4),  60, 15, "wti"),
 }
 
-# Only the i.i.d. (b=1) rank is needed for the main MC-ROI p50 lift result.
-METHOD_COLS = ['iid_rank']
-METHOD_NAMES = ['MC-ROI p50 (i.i.d.)']
+FILTERS = {
+    "MC-MDD p50":    ("mdd_rank", 50),
+    "MC-MDD p75":    ("mdd_rank", 75),
+    "MC-Calmar p50": ("calmar_rank", 50),
+    "MC-Calmar p75": ("calmar_rank", 75),
+    "MC-Ulcer p50":  ("ulcer_rank", 50),
+    "MC-Ulcer p75":  ("ulcer_rank", 75),
+    "MC-ROI* p50":   ("roi_rank_broken", 50),
+    "MC-ROI* p75":   ("roi_rank_broken", 75),
+}
 
-N_BOOT = 10000
 
-
-def compute_oos_periods():
-    """Compute calendar OOS start/end for each (asset, window) from the WFO
-    protocol: IS = 10,000 candles, advance = 5,000 candles. Crypto assets
-    trade 24/7 (candles map directly to calendar time). Forex/commodity
-    windows are approximated in clock hours."""
+def oos_periods():
     periods = {}
-
-    # (data_start, timeframe_minutes, n_windows)
-    crypto_config = {
-        'BTC':  (datetime(2019, 12, 31), 30, 27),
-        'DOGE': (datetime(2020, 7, 10),  30, 21),
-        'BNB':  (datetime(2020, 2, 10),  15, 30),
-        'SOL':  (datetime(2020, 9, 14),  60, 7),
-    }
-    for asset, (data_start, tf_min, n_windows) in crypto_config.items():
-        is_candles, advance_candles = 10000, 5000
+    for asset, (start, tf_min, nw, _) in CRYPTO_CONFIG.items():
         candle = timedelta(minutes=tf_min)
-        is_duration = is_candles * candle
-        oos_duration = advance_candles * candle
-        for w in range(1, n_windows + 1):
-            is_start = data_start + (w - 1) * advance_candles * candle
-            oos_start = is_start + is_duration
-            oos_end = oos_start + oos_duration
+        is_dur = 10_000 * candle
+        oos_dur = 5_000 * candle
+        for w in range(1, nw + 1):
+            is_start = start + (w - 1) * 5_000 * candle
+            oos_start = is_start + is_dur
+            oos_end = oos_start + oos_dur
             periods[(asset, w)] = (oos_start, oos_end)
-
-    # Forex/commodity: 15 sliding windows; approximate calendar days from
-    # clock-hour-equivalent advance/IS durations (weekend closures ignored).
-    fx_config = {
-        'EUR/USD': (datetime(2017, 7, 3),  15),
-        'USD/JPY': (datetime(2016, 3, 24), 15),
-        'EUR/GBP': (datetime(2016, 3, 24), 15),
-        'XAU/USD': (datetime(2016, 3, 28), 15),
-        'WTI':     (datetime(2016, 3, 28), 15),
-    }
-    advance_days_fx = 5000 / 24
-    is_days_fx = 10000 / 24
-    for asset, (data_start, n_windows) in fx_config.items():
-        for w in range(1, n_windows + 1):
-            is_start = data_start + timedelta(days=(w - 1) * advance_days_fx)
-            oos_start = is_start + timedelta(days=is_days_fx)
-            oos_end = oos_start + timedelta(days=advance_days_fx)
-            periods[(asset, w)] = (oos_start, oos_end)
-
     return periods
 
 
-def assign_calendar_clusters(periods):
-    """Group (asset, window) pairs by calendar-quarter of OOS midpoint."""
+def assign_clusters(periods):
     clusters = {}
-    for (asset, w), (oos_start, oos_end) in periods.items():
-        midpoint = oos_start + (oos_end - oos_start) / 2
-        quarter = (midpoint.year, (midpoint.month - 1) // 3 + 1)
-        clusters.setdefault(quarter, []).append((asset, w))
-    return list(clusters.values())
+    for (asset, w), (s, e) in periods.items():
+        mid = s + (e - s) / 2
+        q = (mid.year, (mid.month - 1) // 3 + 1)
+        clusters.setdefault(q, []).append((asset, w))
+    return clusters
 
 
-def load_and_aggregate(calendar_clusters):
-    """Load data and aggregate counts per (asset, window), then per cluster."""
-    print("Loading data...")
-    aw_data = {}
-
-    for asset, info in ASSETS_INFO.items():
-        bp_path = RAW / info['csv']
-        wp_path = RAW / info['wp']
-        if not bp_path.exists() or not wp_path.exists():
-            print(f"  {asset}: MISSING, skipping")
+def load_aw_aggregates():
+    """For every (asset, window), compute the cluster-bootstrap inputs:
+    n, n_oos_prof, and per-filter n_pass / n_pass_oos."""
+    aw = {}
+    for asset, (_, _, _, short) in CRYPTO_CONFIG.items():
+        rp = DATA / f"{short}_corrected_ranks.csv"
+        wp = DATA / f"{short}_window_pairs.csv"
+        if not rp.exists() or not wp.exists():
+            print(f"  [{asset}] missing data — skip")
             continue
-
-        bp = pd.read_csv(bp_path)
-        wp = pd.read_csv(wp_path)
-        # Convert W-prefixed window labels to integers to match window_pairs
-        bp['window_i'] = bp['window'].astype(str).str.replace('W', '').astype(int)
-
-        wp_dict = {
-            (row['strategy'], row['window_i']): row['baseline_oos_pf']
-            for _, row in wp.iterrows()
-        }
-        bp['oos_prof'] = bp.apply(
-            lambda r: 1 if wp_dict.get((r['strategy'], r['window_i']), 0) > 1.0 else 0,
-            axis=1,
-        )
-        bp = bp[bp.apply(
-            lambda r: (r['strategy'], r['window_i']) in wp_dict, axis=1
-        )].copy()
-
-        for w, grp in bp.groupby('window_i'):
-            entry = {
-                'asset': asset, 'window': w,
-                'n': len(grp),
-                'n_oos_prof': int(grp['oos_prof'].sum()),
-            }
-            for col in METHOD_COLS:
-                if col in grp.columns:
-                    passed = grp[grp[col] >= 50]
-                    entry[f'{col}_n_pass'] = len(passed)
-                    entry[f'{col}_n_pass_oos'] = int(passed['oos_prof'].sum())
-                else:
-                    entry[f'{col}_n_pass'] = 0
-                    entry[f'{col}_n_pass_oos'] = 0
-            aw_data[(asset, w)] = entry
-        print(f"  {asset}: {len(bp):,} obs -> {bp['window'].nunique()} windows")
-
-    cluster_data = []
-    for cluster_members in calendar_clusters:
-        combined = {'members': cluster_members, 'n': 0, 'n_oos_prof': 0}
-        for col in METHOD_COLS:
-            combined[f'{col}_n_pass'] = 0
-            combined[f'{col}_n_pass_oos'] = 0
-        for (asset, w) in cluster_members:
-            if (asset, w) in aw_data:
-                e = aw_data[(asset, w)]
-                combined['n'] += e['n']
-                combined['n_oos_prof'] += e['n_oos_prof']
-                for col in METHOD_COLS:
-                    combined[f'{col}_n_pass'] += e[f'{col}_n_pass']
-                    combined[f'{col}_n_pass_oos'] += e[f'{col}_n_pass_oos']
-        if combined['n'] > 0:
-            cluster_data.append(combined)
-    return cluster_data
+        r = pd.read_csv(rp)
+        r["window_i"] = r["window"].str.replace("W", "").astype(int)
+        w = pd.read_csv(wp)
+        df = pd.merge(w, r[["strategy","window_i","mdd_rank","calmar_rank",
+                            "ulcer_rank","roi_rank_broken"]],
+                      on=["strategy","window_i"])
+        df = df[df["baseline_oos_pf"].notna()].copy()
+        df["oos_prof"] = (df["baseline_oos_pf"] > 1).astype(int)
+        for wi, g in df.groupby("window_i"):
+            entry = {"asset": asset, "window": int(wi),
+                     "n": len(g), "n_oos": int(g["oos_prof"].sum())}
+            for fname, (col, thr) in FILTERS.items():
+                passing = g[g[col] >= thr]
+                entry[f"{fname}_n_pass"] = len(passing)
+                entry[f"{fname}_n_pass_oos"] = int(passing["oos_prof"].sum())
+            aw[(asset, wi)] = entry
+        print(f"  [{asset}] {df['window_i'].nunique()} windows aggregated")
+    return aw
 
 
-def bootstrap_batch(args):
-    cluster_data, n_clusters, batch_size, seed = args
-    rng = np.random.RandomState(seed)
-    results = []
-    for _ in range(batch_size):
-        idx = rng.randint(0, n_clusters, size=n_clusters)
-        total_n = total_oos = 0
-        method_pass = {c: 0 for c in METHOD_COLS}
-        method_pass_oos = {c: 0 for c in METHOD_COLS}
-        for i in idx:
-            c = cluster_data[i]
-            total_n += c['n']
-            total_oos += c['n_oos_prof']
-            for col in METHOD_COLS:
-                method_pass[col] += c[f'{col}_n_pass']
-                method_pass_oos[col] += c[f'{col}_n_pass_oos']
-        baseline = total_oos / total_n if total_n > 0 else 0
-        lifts = {}
-        for col in METHOD_COLS:
-            if method_pass[col] > 0:
-                lifts[col] = (method_pass_oos[col] / method_pass[col] - baseline) * 100
-            else:
-                lifts[col] = np.nan
-        results.append(lifts)
-    return results
+def cluster_lift(cluster_members, aw, filter_name):
+    n_total = n_prof_total = n_pass = n_pass_prof = 0
+    for k in cluster_members:
+        if k not in aw: continue
+        e = aw[k]
+        n_total += e["n"]; n_prof_total += e["n_oos"]
+        n_pass += e[f"{filter_name}_n_pass"]
+        n_pass_prof += e[f"{filter_name}_n_pass_oos"]
+    if n_total == 0 or n_pass == 0: return np.nan
+    return (n_pass_prof / n_pass - n_prof_total / n_total) * 100
 
 
 def main():
-    print("Computing OOS calendar periods...")
-    periods = compute_oos_periods()
-    print(f"  Total (asset, window) pairs: {len(periods)}")
+    periods = oos_periods()
+    clusters_map = assign_clusters(periods)
+    clusters = list(clusters_map.values())
+    print(f"Calendar-quarter clusters: {len(clusters)}")
+    aw = load_aw_aggregates()
 
-    calendar_clusters = assign_calendar_clusters(periods)
-    print(f"  Calendar-period clusters: {len(calendar_clusters)}")
+    # Per-cluster observed sums for vectorised bootstrap
+    n_clusters = len(clusters)
+    sums = {}
+    for fname in FILTERS:
+        n_tot = np.zeros(n_clusters); n_oos = np.zeros(n_clusters)
+        n_pass = np.zeros(n_clusters); n_pp = np.zeros(n_clusters)
+        for ci, members in enumerate(clusters):
+            for k in members:
+                if k not in aw: continue
+                e = aw[k]
+                n_tot[ci] += e["n"]; n_oos[ci] += e["n_oos"]
+                n_pass[ci] += e[f"{fname}_n_pass"]
+                n_pp[ci] += e[f"{fname}_n_pass_oos"]
+        sums[fname] = (n_tot, n_oos, n_pass, n_pp)
 
-    cluster_data = load_and_aggregate(calendar_clusters)
-    n_clusters = len(cluster_data)
-    print(f"\nNon-empty calendar clusters: {n_clusters}")
-
-    total_n = sum(c['n'] for c in cluster_data)
-    total_oos = sum(c['n_oos_prof'] for c in cluster_data)
-    baseline = total_oos / total_n
-    print(f"Total observations: {total_n:,}")
-    print(f"Pooled baseline: {baseline*100:.2f}%")
-
-    point_lifts = {}
-    for col in METHOD_COLS:
-        total_pass = sum(c[f'{col}_n_pass'] for c in cluster_data)
-        total_pass_oos = sum(c[f'{col}_n_pass_oos'] for c in cluster_data)
-        pass_rate = total_pass_oos / total_pass if total_pass > 0 else 0
-        point_lifts[col] = (pass_rate - baseline) * 100
-
-    n_workers = min(cpu_count(), 32)
-    batch_size = N_BOOT // n_workers
-    remainder = N_BOOT % n_workers
-    # Deterministic seeds: 42 + worker index
-    args_list = [
-        (cluster_data, n_clusters,
-         batch_size + (1 if i < remainder else 0), 42 + i)
-        for i in range(n_workers)
-    ]
-
-    print(f"\nRunning {N_BOOT} resamples on {n_workers} workers "
-          f"({n_clusters} clusters)...")
-    with Pool(n_workers) as pool:
-        all_batches = pool.map(bootstrap_batch, args_list)
-
-    all_results = [r for batch in all_batches for r in batch]
-    print(f"Completed {len(all_results)} resamples.\n")
-
-    print('=' * 75)
-    print(f"CALENDAR-PERIOD CLUSTERED BOOTSTRAP CIs  "
-          f"({N_BOOT} resamples, {n_clusters} clusters)")
-    print('=' * 75)
-
+    rng = np.random.default_rng(42)
     rows = []
-    for col, name in zip(METHOD_COLS, METHOD_NAMES):
-        lifts = np.array([r[col] for r in all_results if not np.isnan(r[col])])
-        point = point_lifts[col]
-        se = np.std(lifts)
-        ci_lo = np.percentile(lifts, 2.5)
-        ci_hi = np.percentile(lifts, 97.5)
-        z = point / se if se > 0 else np.nan
-        p_pos = np.mean(lifts >= 0)
+    for fname, (col, thr) in FILTERS.items():
+        n_tot, n_oos, n_pass, n_pp = sums[fname]
+        obs_base = n_oos.sum() / n_tot.sum() if n_tot.sum() else np.nan
+        obs_pass = n_pp.sum() / n_pass.sum() if n_pass.sum() else np.nan
+        obs_lift = (obs_pass - obs_base) * 100 if not np.isnan(obs_pass) else np.nan
 
-        print(f"\n  {name}:")
-        print(f"    Point estimate: {point:+.2f} pp")
-        print(f"    Bootstrap SE:   {se:.4f}")
-        print(f"    95% CI:         [{ci_lo:+.2f}, {ci_hi:+.2f}]")
-        print(f"    z-score:        {z:.1f}")
-        print(f"    P(lift >= 0):   {p_pos:.6f}")
-
+        idx = rng.integers(0, n_clusters, size=(N_BOOT, n_clusters))
+        b_tot  = n_tot[idx].sum(axis=1)
+        b_oos  = n_oos[idx].sum(axis=1)
+        b_pass = n_pass[idx].sum(axis=1)
+        b_pp   = n_pp[idx].sum(axis=1)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            base = b_oos / b_tot
+            pr = np.where(b_pass > 0, b_pp / b_pass, np.nan)
+            boots = (pr - base) * 100
+        boots = boots[~np.isnan(boots)]
+        if len(boots) < 100:
+            rows.append({"Filter": fname, "Threshold": thr, "N_clusters": n_clusters,
+                         "Observed Lift (pp)": np.nan, "Boot mean": np.nan,
+                         "CI low": np.nan, "CI high": np.nan, "p(lift<=0)": np.nan})
+            continue
+        lo, hi = np.percentile(boots, [2.5, 97.5])
         rows.append({
-            'Filter': name,
-            'Point_pp': round(point, 3),
-            'SE': round(se, 4),
-            'CI_lo': round(ci_lo, 3),
-            'CI_hi': round(ci_hi, 3),
-            'z': round(z, 2),
-            'P_lift_ge_0': p_pos,
+            "Filter": fname, "Threshold": thr, "N_clusters": n_clusters,
+            "Observed Lift (pp)": round(float(obs_lift), 3),
+            "Boot mean (pp)": round(float(boots.mean()), 3),
+            "CI low (pp)": round(float(lo), 3),
+            "CI high (pp)": round(float(hi), 3),
+            "p(lift<=0)": round(float((boots <= 0).mean()), 4),
+            "n_boot_valid": int(len(boots)),
         })
+    df = pd.DataFrame(rows)
+    df.to_csv(OUT / "table15_calendar_cluster_bootstrap_corrected.csv", index=False)
+    print(f"\n→ {OUT / 'table15_calendar_cluster_bootstrap_corrected.csv'}")
+    print(df.to_string(index=False))
 
-    out = TABLES / 'empirical_bootstrap_ci.csv'
-    pd.DataFrame(rows).to_csv(out, index=False)
-    print(f"\nSaved {out}")
 
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

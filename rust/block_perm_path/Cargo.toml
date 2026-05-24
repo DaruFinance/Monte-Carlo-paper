@@ -1,0 +1,20 @@
+[package]
+name = "block_perm_path"
+version = "0.1.0"
+edition = "2021"
+authors = ["Daniel Gatto"]
+description = "Block-permutation MC ranks using path-dependent MDD (replaces sum-based block_perm)."
+license = "MIT"
+
+[dependencies]
+rayon = "1.10"
+rand = { version = "0.8", features = ["small_rng"] }
+walkdir = "2"
+
+[[bin]]
+name = "block_perm_path"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = 3
+lto = true

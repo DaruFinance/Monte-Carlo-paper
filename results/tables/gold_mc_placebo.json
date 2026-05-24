@@ -1,0 +1,137 @@
+[
+  {
+    "asset": "btc",
+    "n_pool": 29440,
+    "n_filt": 10683,
+    "baseline": 32.17,
+    "gold_mdd_lift": -0.44,
+    "placebo_mean": 0.011,
+    "placebo_ci": [
+      -0.72,
+      0.78
+    ],
+    "gold_outside_ci": false,
+    "is_mdd_lift": 5.1,
+    "is_pf_lift": 3.57
+  },
+  {
+    "asset": "doge",
+    "n_pool": 25774,
+    "n_filt": 9283,
+    "baseline": 37.24,
+    "gold_mdd_lift": 0.22,
+    "placebo_mean": -0.0,
+    "placebo_ci": [
+      -0.77,
+      0.79
+    ],
+    "gold_outside_ci": false,
+    "is_mdd_lift": 4.9,
+    "is_pf_lift": 4.08
+  },
+  {
+    "asset": "bnb",
+    "n_pool": 37662,
+    "n_filt": 12370,
+    "baseline": 29.27,
+    "gold_mdd_lift": -0.72,
+    "placebo_mean": -0.012,
+    "placebo_ci": [
+      -0.64,
+      0.64
+    ],
+    "gold_outside_ci": true,
+    "is_mdd_lift": 6.02,
+    "is_pf_lift": 4.95
+  },
+  {
+    "asset": "sol",
+    "n_pool": 8607,
+    "n_filt": 3084,
+    "baseline": 41.64,
+    "gold_mdd_lift": 0.03,
+    "placebo_mean": -0.013,
+    "placebo_ci": [
+      -1.34,
+      1.36
+    ],
+    "gold_outside_ci": false,
+    "is_mdd_lift": 4.44,
+    "is_pf_lift": 3.63
+  },
+  {
+    "asset": "eurusd",
+    "n_pool": 21215,
+    "n_filt": 11671,
+    "baseline": 12.56,
+    "gold_mdd_lift": 2.85,
+    "placebo_mean": -0.002,
+    "placebo_ci": [
+      -0.4,
+      0.4
+    ],
+    "gold_outside_ci": true,
+    "is_mdd_lift": 5.62,
+    "is_pf_lift": 0.38
+  },
+  {
+    "asset": "usdjpy",
+    "n_pool": 21151,
+    "n_filt": 8176,
+    "baseline": 9.18,
+    "gold_mdd_lift": 4.88,
+    "placebo_mean": -0.002,
+    "placebo_ci": [
+      -0.49,
+      0.5
+    ],
+    "gold_outside_ci": true,
+    "is_mdd_lift": 8.04,
+    "is_pf_lift": 3.52
+  },
+  {
+    "asset": "eurgbp",
+    "n_pool": 21296,
+    "n_filt": 15152,
+    "baseline": 27.97,
+    "gold_mdd_lift": 3.47,
+    "placebo_mean": -0.005,
+    "placebo_ci": [
+      -0.39,
+      0.35
+    ],
+    "gold_outside_ci": true,
+    "is_mdd_lift": 4.73,
+    "is_pf_lift": 2.05
+  },
+  {
+    "asset": "xauusd",
+    "n_pool": 21140,
+    "n_filt": 2376,
+    "baseline": 53.71,
+    "gold_mdd_lift": 2.27,
+    "placebo_mean": 0.013,
+    "placebo_ci": [
+      -1.81,
+      1.85
+    ],
+    "gold_outside_ci": true,
+    "is_mdd_lift": -1.86,
+    "is_pf_lift": -0.76
+  },
+  {
+    "asset": "wti",
+    "n_pool": 21134,
+    "n_filt": 3177,
+    "baseline": 43.23,
+    "gold_mdd_lift": -1.12,
+    "placebo_mean": -0.012,
+    "placebo_ci": [
+      -1.59,
+      1.62
+    ],
+    "gold_outside_ci": false,
+    "is_mdd_lift": 1.27,
+    "is_pf_lift": 1.08
+  }
+]

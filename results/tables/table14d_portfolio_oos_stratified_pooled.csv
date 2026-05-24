@@ -1,0 +1,11 @@
+Asset,MC-MDD decile,N portfolios,Same-win OOS profitable %,Same-win lift vs asset baseline (pp),Next-win OOS profitable %,Next-win lift vs asset baseline (pp),Mean OOS same PF,Mean OOS next PF
+ALL (pooled),D1 (0-10),5648,21.85,2.62,20.41,2.97,0.849,0.843
+ALL (pooled),D2 (10-20),8061,21.83,2.6,20.68,3.24,0.843,0.839
+ALL (pooled),D3 (20-30),9717,20.37,1.14,19.81,2.37,0.835,0.829
+ALL (pooled),D4 (30-40),11378,20.84,1.61,19.39,1.95,0.832,0.823
+ALL (pooled),D5 (40-50),13172,19.79,0.56,19.07,1.63,0.822,0.822
+ALL (pooled),D6 (50-60),15026,20.06,0.83,18.97,1.53,0.821,0.815
+ALL (pooled),D7 (60-70),17535,18.72,-0.51,18.11,0.67,0.814,0.812
+ALL (pooled),D8 (70-80),20143,18.88,-0.35,18.7,1.26,0.812,0.809
+ALL (pooled),D9 (80-90),24399,19.12,-0.11,18.05,0.61,0.81,0.807
+ALL (pooled),D10 (90-100),34921,17.33,-1.9,16.93,-0.51,0.797,0.795

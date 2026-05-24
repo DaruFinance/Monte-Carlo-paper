@@ -6,16 +6,17 @@ correlation of strategies' OOS Profit Factor profiles across WFO windows
 and reports within-family vs cross-family correlation statistics
 (by indicator family: ATR, EMA, SMA, PPO, RSI, RSI_LEVEL, STOCHK, MACD).
 
-Outputs feed:
-  - Figure 1 (fig_strategy_correlations.pdf) — cross-instrument summary panel
-  - Table 3  (within-family vs cross-family bar-level PnL correlation)
+Outputs feed Table tab:family_corr (within-family vs cross-family bar-level
+PnL correlation). The accompanying figure has been retired from the paper's
+\\includegraphics set; this script now acts as a thin wrapper that reads the
+output of the rust/corr_rs crate to produce the family-correlation summary
+CSV. No figure is emitted from the paper's main body.
 
 Inputs (relative to project root):
   - results/raw_data/<asset>_window_pairs.csv  (all 9 assets)
 
 Outputs:
-  - results/figures/fig_strategy_correlations.pdf
-  - results/tables/strategy_oos_summary.csv
+  - results/tables/strategy_oos_summary.csv  (feeds tab:family_corr)
 """
 import os
 from pathlib import Path

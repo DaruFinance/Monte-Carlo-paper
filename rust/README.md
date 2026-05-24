@@ -1,189 +1,65 @@
 # Rust crates
 
-Three independent Cargo crates that generate numerical artifacts for the paper.
-They are standalone and can be built in any order, but all three depend on
-upstream raw data produced by the backtesting system (not included here).
+Seven independent Cargo crates that produce the numerical artifacts the
+Python pipeline consumes. All are parallelised with [rayon] and all use
+fixed seeds for bit-reproducible output.
+
+[rayon]: https://crates.io/crates/rayon
+
+| Crate | Purpose | Outputs (under `results/raw_data/`) |
+|---|---|---|
+| `mc_path_ranks` | Per-window MC percentile ranks on **path-dependent** statistics (MDD / Calmar / Ulcer) and, side-by-side, the **artefactual** ROI rank documented in §8.4 of the paper. | `<asset>_corrected_ranks.csv` |
+| `block_perm_path` | Block-permutation MC ranks for the same path-dependent statistics, at block sizes b ∈ {2, 3, 5, 10, 20}. | `block_perm_path_<asset>.csv` |
+| `portfolio_mc_path` | Portfolio-level MC ranks under permutation, using path-dependent MDD. | `<asset>_portfolio_mc_path.csv` |
+| `portfolio_mc_oos` | As above, augmented with same-window and next-window OOS outcomes per portfolio. | `<asset>_portfolio_mc_oos.csv` |
+| `block_perm_rs` | Legacy block-permutation binary for the sum-based ROI/Sharpe/PF ranks. Retained because §8.4 demonstrates that the leftward shift these binaries produce on real data is a floating-point summation-order artefact, not a property of the data; the artefact is reproducible from the `block_perm` binary and verifiable against `python/fp_pitfall_demo.py`. **Do not use this binary as a filter signal.** | `block_perm_<asset>.csv` |
+| `corr_rs` | Within-family and cross-family strategy-return correlation matrices. | per-asset correlation tensors |
+| `synthetic_pipeline_rust` | Self-contained synthetic AR(1) + GARCH + Student-t scenarios with three signal tiers (Pure Null, Known Edge, Adversarial). | `results/raw_data/synthetic_v4/*.csv` |
 
 ## Toolchain
 
-- Rust edition **2021**, stable toolchain (tested with 1.75+).
-- Parallelism: all three crates use [`rayon`](https://crates.io/crates/rayon) and
-  will by default saturate available CPU cores. The synthetic pipeline pins
-  itself to 32 worker threads via `rayon::ThreadPoolBuilder` — edit `N_WORKERS`
-  in `synthetic_pipeline_rust/src/main.rs` for smaller machines.
-- No non-Rust system dependencies. `nalgebra` (used by `corr_tensor`) is pure
-  Rust and compiles with the default stable toolchain.
-- All seeds are fixed, so rebuilding reproduces the paper numerics bit-for-bit
-  on the same architecture.
+- Rust **2021** edition; stable toolchain, tested on 1.94.
+- All crates use `rayon` and will by default saturate the available CPU
+  cores. `synthetic_pipeline_rust` pins itself to 32 worker threads via
+  `rayon::ThreadPoolBuilder` — edit `N_WORKERS` if your machine has fewer
+  cores.
+- No non-Rust system dependencies.
+- Seeds are fixed; rebuilding reproduces the paper's CSVs bit-for-bit on
+  the same architecture.
 
-## Directory layout assumed by defaults
-
-```
-Scripts_Clean/
-  rust/                   <-- you are here
-    block_perm_rs/
-    corr_rs/
-    synthetic_pipeline_rust/
-  ...
-results/
-  raw_data/               <-- *_window_pairs.csv, *_mc_perwindow.csv, raw OHLC CSVs
-  tables_v2/              <-- synthetic_pipeline output lands here by default
-```
-
-Every crate accepts explicit paths (CLI arg or env var) so the layout is a
-convenience, not a requirement.
-
----
-
-## 1. `block_perm_rs/` &mdash; block permutation MC ranks
-
-**Produces:** `block_perm_<asset>.csv` files (one per asset) that feed
-**Table 19** (block permutation MC test) and **Figure 3** (bootstrap lift
-distributions) via the Python scripts `block_perm_analysis.py` and
-`calendar_cluster_bootstrap.py`.
-
-**Binaries:**
-
-- `block_perm` &mdash; block-permutation ROI ranks at block sizes
-  b = 1, 2, 3, 5, 10, 20.
-- `mc_sharpe_pf` &mdash; bootstrap MC ranks for ROI / Sharpe / PF in the
-  `raw_data/<asset>_mc_perwindow.csv` schema used throughout the paper.
-
-**Input:** a directory laid out as
-`<base_dir>/<family>/<strategy>/trades.bin`, where `trades.bin` is the
-backtester's binary trade-log format. The layout, in little-endian:
-
-```
-u16 name_len, <name bytes>,
-u16 lb_len,   <lookback bytes>,
-u16 sec_len,  <section bytes, e.g. "W03-IS">,
-u32 count,
-count * (u32 entry, u32 exit, u8 dir, f64 pnl)   [17 bytes / trade]
-```
-
-Only IS sections with at least 10 trades are analysed. The binary format is
-produced by an external backtester (not part of this repository); the parsing
-code is kept here so that the CSVs can be regenerated from raw trade logs.
-
-**Build and run:**
+## Build & run
 
 ```bash
-cd block_perm_rs
-cargo build --release
-cargo run --release --bin block_perm -- <base_dir> <n_mc> > block_perm_btc.csv
-cargo run --release --bin mc_sharpe_pf -- <base_dir> <n_mc> btc_mc_perwindow.csv
-```
+# Build everything in release mode
+for c in mc_path_ranks block_perm_path portfolio_mc_path portfolio_mc_oos \
+         block_perm_rs corr_rs synthetic_pipeline_rust ; do
+  ( cd $c && cargo build --release )
+done
 
-Suggested `n_mc` for paper reproduction: `1000`.
-
-**Output columns (`block_perm`):**
-`strategy, window, n_trades, iid_rank, block2_rank, block3_rank, block5_rank,
-block10_rank, block20_rank`
-
-**Output columns (`mc_sharpe_pf`):**
-`strategy, window, n_trades, actual_roi, actual_sharpe, actual_pf,
-roi_pct_rank, sharpe_pct_rank, pf_pct_rank`
-
----
-
-## 2. `corr_rs/` &mdash; strategy correlation + cross-asset tensor
-
-**Produces:** inputs for **Figure 1** (within-family vs cross-family bar-level
-PnL correlation) and **Table 3**, consumed by
-`correlation_analysis/strategy_correlations.py`. Also produces cross-asset
-rolling correlation diagnostics.
-
-**Binaries:**
-
-- `strat_corr` &mdash; sparse bar-level Pearson correlation of strategies
-  within one asset, grouped by indicator family
-  (ATR / EMA / MACD / PPO / RSI / RSI_LEVEL / SMA / STOCHK). Reads the same
-  `trades.bin` format as `block_perm_rs`.
-
-  ```bash
-  cargo run --release --bin strat_corr -- \
-      <base_dir> <window_size> <instrument> <market> [output_dir]
-  # market is one of: crypto | forex | commodity
-  ```
-
-  Emits five CSVs per invocation:
-  `<instrument>_embed.csv`, `<instrument>_fammatrix.csv`,
-  `<instrument>_summary.csv`, `<instrument>_histogram.csv`,
-  `<instrument>_perfamily.csv`.
-
-- `corr_tensor` &mdash; 7-instrument rolling correlation tensor on 1h log
-  returns. Resamples mixed 15m/30m/1h OHLC CSVs to hourly close and computes
-  a 720-bar rolling correlation matrix (step 24 hours).
-
-  ```bash
-  cargo run --release --bin corr_tensor -- <data_dir> <out_dir>
-  # or: MC_PAPER_DATA_DIR=... MC_PAPER_OUT_DIR=... cargo run --release --bin corr_tensor
-  ```
-
-  Expected filenames under `<data_dir>`:
-  `BTCUSDT_30m_3_9.csv`, `BNBUSDT_15m_3_9.csv` (time column `time`),
-  `EURUSD_1h_clean.csv`, `USDJPY_1h_clean.csv`, `EURGBP_1h_clean.csv`,
-  `XAUUSD_1h_clean.csv`, `WTI_1h_clean.csv` (time column `timestamp`).
-  SOL and DOGE are excluded because their histories are too short for the
-  common-window intersection.
-
-  Outputs: `corr_tensor.csv`, `corr_eigenvalues.csv`, `corr_avg.csv`.
-
----
-
-## 3. `synthetic_pipeline_rust/` &mdash; three-tier synthetic validation
-
-**Produces:** CSV tables for **Scenarios A/B/C** that feed paper **Figures 5-8**
-(`fig_synthetic_mc_ranks.pdf`, `fig_synthetic_mc_analysis.pdf`,
-`fig_synthetic_pipeline_v4.pdf`, `fig_synthetic_pipeline_detail.pdf`) via the
-Python figure regeneration script. This is the Rust rewrite of
-`synthetic_pipeline_v4.py` with parameters matched to the empirical setup
-(B = 1000 MC permutations, ~38K strategies, 10 WFO windows).
-
-**Tiers:**
-
-| Tier | Description | Grid |
-|---|---|---|
-| 1 &mdash; null | pure-null returns, no injected edge | standard |
-| 2 &mdash; edge | weak AR(1) momentum edge (phi = 0.04) | standard |
-| 3 &mdash; adversarial | adversarial data-mined grid | massive |
-| signal sweep | phi in {0.00, 0.02, 0.04, 0.06, 0.08, 0.10, 0.15} | standard |
-
-**Input:** none &mdash; the crate self-generates synthetic returns
-(AR(1) momentum + GARCH(1,1) + Student-t innovations with df = 5, plus a
-two-state volatility regime).
-
-**Build and run:**
-
-```bash
+# Synthetic pipeline (fully self-contained, no external data)
 cd synthetic_pipeline_rust
-cargo build --release
-cargo run --release                      # writes to ../../results/tables_v2
-cargo run --release -- /custom/out/dir   # explicit output directory
-MC_PAPER_TBL_DIR=/custom/out/dir cargo run --release   # or via env var
+cargo run --release -- ../../results/raw_data/synthetic_v4
 ```
 
-**Output CSVs:**
+The other six crates each accept a base directory laid out as
+`<base>/<family>/<strategy>/trades.bin`, where `trades.bin` is the
+backtester's binary trade-log format. Per-crate `--help` documents the
+exact CLI. The backtester that produces this layout is open source at
+<https://github.com/DaruFinance/quant-research-framework-rs>.
 
-```
-synthetic_v4_summaries_matched.csv
-synthetic_v4_null_filters_matched.csv
-synthetic_v4_edge_filters_matched.csv
-synthetic_v4_adversarial_filters_matched.csv
-synthetic_v4_signal_sweep_matched.csv
-```
+## Path-dependent statistics, in one paragraph
 
-Runtime: approximately 30-60 minutes on a 32-core machine at B = 1000.
-Reduce `N_MC` or `N_SIMS` in `src/main.rs` for a quicker smoke test.
+For an equity curve E_0, E_1, …, E_n built by accumulating realised trade
+PnLs, denote drawdown `d_t = E_t - max_{s ≤ t} E_s`. Then:
 
----
+- **MDD** = max_t |d_t|
+- **Calmar** = ROI / |MDD|
+- **Ulcer** = sqrt(mean(d_t^2))
 
-## Reproducibility notes
-
-- All RNGs (`SmallRng`, `StdRng`) are seeded explicitly. `block_perm` derives
-  per-window seeds from `(strategy_index, window, block_size)`; `strat_corr`
-  uses fixed seed 42; `synthetic_pipeline` uses per-simulation seeds.
-- No unsafe code. No FFI.
-- Floating-point results are deterministic within a single machine but may
-  differ at the ULP level across CPU families (as is normal for rayon +
-  fused-multiply-add).
+These three are functions of the realised trade *ordering*, not just the
+multiset of trade PnLs; under a permutation null they produce a
+non-degenerate rank distribution. The paper restricts within-strategy MC
+filtering to these three; the sum-based statistics (ROI, trade-level
+Sharpe, Profit Factor) are proven multiset-invariant in Appendix A4
+(Proposition `multiset_invariance`) and are not usable as MC filter
+scores.

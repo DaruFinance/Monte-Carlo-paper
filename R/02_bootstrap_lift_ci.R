@@ -6,20 +6,21 @@
 #'
 #' Cross-validates (Python/Rust source):
 #'   - calendar_cluster_bootstrap.py (clustered bootstrap, paper's primary CI)
-#'   - block_perm_analysis.py (point estimate of lift)
+#'   - block_perm_analysis.py (point estimate of lift, now MDD-based)
 #'
 #' Paper artifact reproduced:
-#'   - Table 5 (central empirical finding: lift -1.1 to -1.2 pp, 9 assets)
-#'   - Table 15 (clustered bootstrap CIs, 10,000 resamples)
+#'   - Corrected Table 5 (per-asset filter-lift comparison, MC-MDD p50)
+#'   - Corrected Table 15 (clustered bootstrap CIs, 10,000 resamples)
 #'
 #' Method:
 #'   For each asset:
-#'     (a) Merge block_perm_<asset>.csv (iid_rank) with
+#'     (a) Merge block_perm_path_<asset>.csv (mdd_rank) with
 #'         raw_data/<asset>_window_pairs.csv on (strategy, window).
 #'     (b) Define oos_profitable = 1 if baseline_oos_pf > 1.0.
 #'     (c) baseline = mean(oos_profitable)
-#'         filtered = mean(oos_profitable | iid_rank >= 50)
+#'         filtered = mean(oos_profitable | mdd_rank >= 50)
 #'         lift     = (filtered - baseline) * 100    (percentage points)
+#'   Corrected: switched from mdd_rank/roi_rank to mdd_rank (paper Section sec:fp-pitfall).
 #'     (d) Bootstrap the lift by clustering on (asset, window). We draw
 #'         N_boot=10,000 window-level resamples with replacement and
 #'         recompute the lift in each resample. We report point estimate,
@@ -58,19 +59,19 @@ bootstrap_lift_for_asset <- function(asset) {
   # Window column in bp is integer-like; window_i in wp is integer.
   wp_small <- wp[, .(strategy, window_i, baseline_oos_pf)]
   setnames(wp_small, "window_i", "window")
-  bp_small <- bp[, .(strategy, window, iid_rank)]
+  bp_small <- bp[, .(strategy, window, mdd_rank)]
 
   m <- merge(bp_small, wp_small, by = c("strategy", "window"))
   if (nrow(m) == 0L) return(NULL)
-  m <- m[is.finite(baseline_oos_pf) & is.finite(iid_rank)]
+  m <- m[is.finite(baseline_oos_pf) & is.finite(mdd_rank)]
   m[, oos_prof := as.integer(baseline_oos_pf > 1.0)]
 
   # Window-level tallies used for both point estimate and cluster bootstrap
   agg <- m[, .(
     n         = .N,
     n_oos     = sum(oos_prof),
-    n_pass    = sum(iid_rank >= 50),
-    n_pass_oos= sum((iid_rank >= 50) * oos_prof)
+    n_pass    = sum(mdd_rank >= 50),
+    n_pass_oos= sum((mdd_rank >= 50) * oos_prof)
   ), by = window]
 
   total_n      <- sum(agg$n)

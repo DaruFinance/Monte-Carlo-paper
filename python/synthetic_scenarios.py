@@ -3,7 +3,7 @@ synthetic_scenarios.py
 ======================
 
 Regenerates the six orphaned "synthetic" reference CSVs cited in
-paper_redacted.tex. The original producer scripts were lost; this file
+the published paper. The original producer scripts were lost; this file
 reconstructs the data-generating process (DGP) and pipeline
 (adapted from the original synthetic pipeline) and writes fresh outputs
 with fixed seeds so reruns are deterministic.
@@ -25,7 +25,7 @@ Tables produced (output dir = ``$MC_PAPER_DATA/results/tables[_v2]``)
     10 windows x 100 random portfolios of size 10 drawn from the
     top IS-PF pool, with std-MC and bootstrap-MC ranks plus mean alpha.
 
-DGP (from paper_redacted.tex Scenario A):
+DGP (from the published paper Scenario A):
     r_t = phi * r_{t-1} * edge_i + drift_i + sigma_t * z_t
     z_t ~ Student-t(df=5) / sqrt(df/(df-2))    (unit var)
     sigma_t^2 = omega + a * r_{t-1}^2 + b * sigma_{t-1}^2   (GARCH(1,1))
@@ -47,14 +47,12 @@ All RNGs are seeded off MASTER_SEED (42). Per-sim offsets are
 sim_id * 1000. Portfolio samplers use (MASTER_SEED + 1000 + portfolio_seed).
 
 Because the original seeds are lost, byte-exact reproduction of the
-committed CSVs is NOT expected; the FIX5_synthetic_scenarios.md report
-documents numeric drift.
-
+committed CSVs is NOT expected.
 Usage
 -----
-    export MC_PAPER_DATA=/mnt/d/Mc_paper_new/Scripts_Clean
-    cd /mnt/d/Mc_paper_new/Scripts_Clean/python
     python3 synthetic_scenarios.py
+    python3 synthetic_scenarios.py --rebuild-corrected   # corrected MDD/Calmar tables
+
 """
 from __future__ import annotations
 
@@ -101,8 +99,7 @@ N_BARS = N_WINDOWS * (IS_SIZE + OOS_SIZE)   # 60_000
 # v4 default 0.16% round-trip cost. Without the original seeds it is not
 # possible to back out whether the mismatch is costs, MC-B, or a DGP
 # variant. Setting cost to zero here is our closest reconstruction; see
-# FIX5 report for the documented numeric drift.
-COST_PER_TRADE = 0.0
+# the v1 release notes for the documented numeric drift.COST_PER_TRADE = 0.0
 
 # MC permutations
 MC_B_DEFAULT = 500
@@ -144,7 +141,6 @@ FAST_CONFIG = {
 SCRIPT_DIR = Path(__file__).resolve().parent
 ROOT = Path(os.environ.get("MC_PAPER_DATA", SCRIPT_DIR.parents[0]))
 TABLES_DIR = ROOT / "results" / "tables"
-TABLES_V2_DIR = ROOT / "results" / "tables_v2"
 
 
 # ----------------------------------------------------------------------
@@ -689,14 +685,12 @@ def run_all(out_dir: Path, cfg: dict):
     return results
 
 
-def main():
+def main_dgp_rebuild():
     ap = argparse.ArgumentParser()
     ap.add_argument("--fast", action="store_true",
                     help="smoke-test scale (~3 min)")
     ap.add_argument("--out", default=None,
-                    help="override output dir (default: results/tables[_v2])")
-    ap.add_argument("--to-tables-v2", action="store_true",
-                    help="write to results/tables_v2/ (safe mode)")
+                    help="override output dir (default: results/tables)")
     args = ap.parse_args()
 
     cfg = dict(CONFIG)
@@ -705,8 +699,6 @@ def main():
 
     if args.out:
         out_dir = Path(args.out)
-    elif args.to_tables_v2:
-        out_dir = TABLES_V2_DIR
     else:
         out_dir = TABLES_DIR
 
@@ -718,5 +710,300 @@ def main():
     print(f"\nAll done in {dt:.1f}s")
 
 
+
+# ======================================================================
+# === Section: Corrected synthetic rebuild (Tables 23/24) ===
+# DGP primitives above are reused (build_strategies, generate_prices,
+# gen_signal, extract_trades, metrics, mc_ranks, CONFIG, FAST_CONFIG).
+# ======================================================================
+
+
+# Output directories for the corrected-rebuild section (reuses the
+# DGP module's ROOT). Row-level dumps land in results/raw_data/ so that
+# downstream figure scripts can pick them up.
+OUT = ROOT / "results" / "tables"
+ROWLEVEL = ROOT / "results" / "raw_data"
+OUT.mkdir(parents=True, exist_ok=True)
+ROWLEVEL.mkdir(parents=True, exist_ok=True)
+
+
+
+def filter_table_corrected(df: pd.DataFrame, label: str) -> pd.DataFrame:
+    """Build a filter-comparison table from a row-level synthetic-pool dataframe,
+    using CORRECTED MDD/Calmar ranks (and ROI* kept for transparency)."""
+    needed = {"oos_profitable", "is_pf_pass", "mc_roi", "mc_mdd", "mc_calmar"}
+    miss = needed - set(df.columns)
+    if miss:
+        raise ValueError(f"missing columns: {miss}")
+    base_rate = df["oos_profitable"].mean() * 100
+    rows = []
+    # baseline
+    rows.append(("No filter", base_rate, base_rate - base_rate, len(df), "—"))
+    bl = df["is_pf_pass"] == 1
+    rows.append(("IS PF>1", df.loc[bl, "oos_profitable"].mean()*100,
+                 df.loc[bl, "oos_profitable"].mean()*100 - base_rate, int(bl.sum()),
+                 f"{(df.loc[bl, 'edge_flag']==1).mean()*100:.1f}" if "edge_flag" in df.columns else "—"))
+    # CORRECTED FILTERS: MDD / Calmar
+    for col, mname in [("mc_mdd", "MC-MDD"), ("mc_calmar", "MC-Calmar")]:
+        for thr in (50, 75, 90):
+            cond = df[col] >= thr
+            if cond.sum() == 0: continue
+            rate = df.loc[cond, "oos_profitable"].mean()*100
+            edge = (df.loc[cond, "edge_flag"]==1).mean()*100 if "edge_flag" in df.columns else None
+            rows.append((f"{mname} p{thr}", rate, rate - base_rate, int(cond.sum()),
+                         f"{edge:.1f}" if edge is not None else "—"))
+            cond_j = cond & bl
+            if cond_j.sum() == 0: continue
+            rate_j = df.loc[cond_j, "oos_profitable"].mean()*100
+            edge_j = (df.loc[cond_j, "edge_flag"]==1).mean()*100 if "edge_flag" in df.columns else None
+            rows.append((f"{mname} p{thr} + IS PF>1", rate_j, rate_j - base_rate, int(cond_j.sum()),
+                         f"{edge_j:.1f}" if edge_j is not None else "—"))
+    # ARTEFACTUAL ROI for reference
+    for thr in (50, 75):
+        cond = df["mc_roi"] >= thr
+        if cond.sum() == 0: continue
+        rate = df.loc[cond, "oos_profitable"].mean()*100
+        rows.append((f"MC-ROI* p{thr} (artefactual)", rate, rate - base_rate, int(cond.sum()), "—"))
+    out = pd.DataFrame(rows, columns=["Filter", "OOS Prof%", "Lift (pp)", "Pool", "% Edge"])
+    out.insert(0, "Scenario", label)
+    return out
+
+
+def build_scenario_a(n_strats: int, n_sims: int, prev: float, mc_b: int) -> pd.DataFrame:
+    """Replicates the high-prevalence scenario A run_sim aggregation, but keeps
+    row-level data so we can pivot on MDD/Calmar filters."""
+    rows = []
+    for sim_id in range(n_sims):
+        strategies = build_strategies(n_strats, seed=sim_id)
+        prices_n, br_n = generate_prices(N_BARS, 0.0, 0.0,
+                                            seed=MASTER_SEED + sim_id * 1000 + 1)
+        prices_e, br_e = generate_prices(N_BARS, PHI, EDGE_DRIFT,
+                                            seed=MASTER_SEED + sim_id * 1000 + 2)
+        rng = np.random.RandomState(MASTER_SEED + sim_id * 7919)
+        edge_mask = rng.random((n_strats, N_WINDOWS)) < prev
+        dropout = rng.random((n_strats, N_WINDOWS)) < EDGE_DROPOUT
+        edge_eff = edge_mask & (~dropout)
+        sig_n = [gen_signal(prices_n, s) for s in strategies]
+        sig_e = [gen_signal(prices_e, s) for s in strategies]
+        for si, strat in enumerate(strategies):
+            for wi in range(N_WINDOWS):
+                is_s = wi * (IS_SIZE + OOS_SIZE)
+                is_e_ = is_s + IS_SIZE
+                oos_s = is_e_; oos_e_ = oos_s + OOS_SIZE
+                if edge_eff[si, wi]: sig = sig_e[si]; br = br_e
+                else:                sig = sig_n[si]; br = br_n
+                is_sig = sig[is_s:is_e_]
+                is_br = br[is_s:is_e_-1] if is_e_-1 <= len(br) else br[is_s:]
+                oos_sig = sig[oos_s:oos_e_]
+                oos_br = br[oos_s:oos_e_-1] if oos_e_-1 <= len(br) else br[oos_s:]
+                is_tr = extract_trades(is_sig, is_br)
+                oos_tr = extract_trades(oos_sig, oos_br)
+                if len(is_tr) < 3: continue
+                im = metrics(is_tr); om = metrics(oos_tr)
+                r = mc_ranks(is_tr, mc_b, rng, bootstrap=False)
+                rows.append({
+                    "sim": sim_id, "strat_id": si, "win": wi,
+                    "n_is_trades": int(im["n"]), "n_oos_trades": int(om["n"]),
+                    "is_pf": im["pf"], "is_roi": im["roi"],
+                    "oos_pf": om["pf"], "oos_roi": om["roi"],
+                    "mc_roi": r["roi"], "mc_mdd": r["mdd"], "mc_calmar": r["calmar"],
+                    "edge_flag": int(edge_eff[si, wi]),
+                    "is_pf_pass": int(im["pf"] > 1.0),
+                    "oos_profitable": int(om["pf"] > 1.0),
+                })
+    return pd.DataFrame(rows)
+
+
+def main_rebuild():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--fast", action="store_true")
+    ap.add_argument("--full", action="store_true")
+    args = ap.parse_args()
+    cfg = dict(CONFIG)
+    if args.fast:
+        cfg = dict(FAST_CONFIG); cfg["MC_B"] = FAST_CONFIG.get("MC_B", 200)
+    # paper-scale default = CONFIG already
+
+    print(f"Scenario A: {cfg['A_N_SIMS']} sims x {cfg['A_N_STRATS']} strats, prev={cfg['A_PREV']}, MC_B={cfg['MC_B']}")
+    t0 = time.time()
+    df_a = build_scenario_a(cfg["A_N_STRATS"], cfg["A_N_SIMS"], cfg["A_PREV"], cfg["MC_B"])
+    print(f"  rows: {len(df_a):,}  ({time.time()-t0:.1f}s)")
+    df_a.to_csv(ROWLEVEL / "synthetic_a_rowlevel.csv", index=False)
+    print(f"  → {ROWLEVEL / 'synthetic_a_rowlevel.csv'}")
+    fa = filter_table_corrected(df_a, "A_high_prev")
+    fa.to_csv(OUT / "synthetic_a_filters_corrected.csv", index=False)
+    print(f"  → {OUT / 'synthetic_a_filters_corrected.csv'}")
+    print(fa.to_string(index=False))
+
+    print(f"\nScenario B: {cfg['B_N_SIMS']} sims x {cfg['B_N_STRATS']} strats, prev={cfg['B_PREV']}, MC_B={cfg['MC_B']}")
+    t0 = time.time()
+    df_b = build_scenario_a(cfg["B_N_STRATS"], cfg["B_N_SIMS"], cfg["B_PREV"], cfg["MC_B"])
+    print(f"  rows: {len(df_b):,}  ({time.time()-t0:.1f}s)")
+    df_b.to_csv(ROWLEVEL / "synthetic_b_rowlevel.csv", index=False)
+    fb = filter_table_corrected(df_b, "B_low_prev")
+    fb.to_csv(OUT / "synthetic_b_filters_corrected.csv", index=False)
+    print(fb.to_string(index=False))
+
+    print(f"\nScenario CMP: {cfg['CMP_N_SIMS']} sims x {cfg['CMP_N_STRATS']} strats, prev={cfg['CMP_PREV']}, MC_B={cfg['MC_B']}")
+    t0 = time.time()
+    df_c = build_scenario_a(cfg["CMP_N_STRATS"], cfg["CMP_N_SIMS"], cfg["CMP_PREV"], cfg["MC_B"])
+    print(f"  rows: {len(df_c):,}  ({time.time()-t0:.1f}s)")
+    df_c.to_csv(ROWLEVEL / "synthetic_cmp_rowlevel.csv", index=False)
+    fc = filter_table_corrected(df_c, "CMP_high_prev_large_pool")
+    fc.to_csv(OUT / "synthetic_filter_comparison_corrected.csv", index=False)
+    print(fc.to_string(index=False))
+
+    # Save also the MC rank distribution stats (analogue of paper Figs 5/6)
+    summary = []
+    for label, df in [("A", df_a), ("B", df_b), ("CMP", df_c)]:
+        for col, mname in [("mc_mdd", "MDD"), ("mc_calmar", "Calmar"), ("mc_roi", "ROI*")]:
+            v = df[col].dropna()
+            summary.append({
+                "Scenario": label, "Metric": mname, "N": len(v),
+                "Mean": round(v.mean(), 2), "Median": round(v.median(), 2),
+                "Std": round(v.std(), 2), "%<50": round((v < 50).mean()*100, 1),
+            })
+    sdf = pd.DataFrame(summary)
+    sdf.to_csv(OUT / "synthetic_mc_rank_stats_corrected.csv", index=False)
+    print(f"\n→ {OUT / 'synthetic_mc_rank_stats_corrected.csv'}")
+    print(sdf.to_string(index=False))
+
+
+
+# ======================================================================
+# === Section: Synthetic corrected tables (Table 25 signal sweep) ===
+# Consumes patched synthetic_pipeline_rust outputs from results/raw_data/synthetic_v4/.
+# ======================================================================
+
+from scipy import stats
+
+DATA = ROOT / "results" / "raw_data" / "synthetic_v4"
+TIERS = [
+    ("null", "1: Pure Null"),
+    ("edge", "2: Known Edge"),
+    ("adversarial", "3: Adversarial"),
+]
+LIFT_COLS = [
+    ("mc_roi_lift_p50", "MC-ROI* (artefactual)"),
+    ("mc_mdd_lift_p50", "MC-MDD"),
+    ("mc_calmar_lift_p50", "MC-Calmar"),
+    ("mc_ulcer_lift_p50", "MC-Ulcer"),
+]
+
+
+def table23_summary(summaries: pd.DataFrame):
+    rows = []
+    for tier_id, tier_label in TIERS:
+        sub = summaries[summaries["tier"] == tier_id]
+        if len(sub) == 0: continue
+        base = sub["baseline_oos"].mean()
+        row = {"Tier": tier_label, "Baseline OOS%": round(float(base), 1)}
+        for col, lab in LIFT_COLS:
+            v = sub[col].to_numpy()
+            ci = np.quantile(v, [0.025, 0.975]) if len(v) > 1 else (v[0], v[0])
+            row[f"{lab} mean (pp)"] = round(float(v.mean()), 2)
+            row[f"{lab} 95% CI"] = f"[{ci[0]:.2f}, {ci[1]:.2f}]"
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def table24_stats(summaries: pd.DataFrame):
+    """One-sample t-test H0: lift = 0 per tier per metric."""
+    rows = []
+    for tier_id, tier_label in TIERS:
+        sub = summaries[summaries["tier"] == tier_id]
+        if len(sub) < 2: continue
+        for col, lab in LIFT_COLS:
+            v = sub[col].to_numpy()
+            t, p = stats.ttest_1samp(v, 0.0) if v.std() > 0 else (np.nan, np.nan)
+            interp = ("Lift signif. negative" if p < 0.05 and t < 0 else
+                      "Lift signif. positive" if p < 0.05 and t > 0 else
+                      "Not rejected")
+            rows.append({
+                "Tier": tier_label, "Metric": lab, "n": int(len(v)),
+                "Mean lift (pp)": round(float(v.mean()), 2),
+                "t": round(float(t), 2),
+                "p-value": f"{p:.4f}",
+                "Interpretation": interp,
+            })
+    return pd.DataFrame(rows)
+
+
+def table25_signal_sweep(summaries: pd.DataFrame):
+    """Lift vs momentum phi, across path-dependent ranks."""
+    sweep = summaries[summaries["tier"].fillna("").str.startswith("sweep_phi_")].copy()
+    if len(sweep) == 0: return pd.DataFrame()
+    sweep["phi"] = sweep["tier"].str.extract(r"sweep_phi_([0-9.]+)").astype(float)
+    rows = []
+    for phi, sub in sweep.groupby("phi", sort=True):
+        base = sub["baseline_oos"].mean()
+        row = {"phi": round(float(phi), 2), "n": int(len(sub)),
+               "Baseline OOS%": round(float(base), 1)}
+        for col, lab in LIFT_COLS:
+            row[f"{lab} lift (pp)"] = round(float(sub[col].mean()), 2)
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def main_corrected_tables():
+    sum_path = DATA / "synthetic_v4_summaries_matched.csv"
+    if not sum_path.exists():
+        print(f"missing {sum_path}; run the patched synthetic_pipeline first.")
+        return
+    # keep_default_na=False so the literal tier name 'null' is preserved
+    # (pandas would otherwise convert it to NaN, dropping Tier 1 rows).
+    summaries = pd.read_csv(sum_path, keep_default_na=False)
+    # restore numeric NaN handling for the lift columns
+    for col in summaries.columns:
+        if col not in ("tier", "sim_id"):
+            summaries[col] = pd.to_numeric(summaries[col], errors="coerce")
+
+    t23 = table23_summary(summaries)
+    t23.to_csv(OUT / "table23_synthetic_tier_summary_corrected.csv", index=False)
+    print(f"→ {OUT / 'table23_synthetic_tier_summary_corrected.csv'}")
+    print(t23.to_string(index=False))
+    print()
+
+    t24 = table24_stats(summaries)
+    t24.to_csv(OUT / "table24_synthetic_tier_stats_corrected.csv", index=False)
+    print(f"→ {OUT / 'table24_synthetic_tier_stats_corrected.csv'}")
+    print(t24.to_string(index=False))
+    print()
+
+    sweep_path = DATA / "synthetic_v4_signal_sweep_matched.csv"
+    if sweep_path.exists():
+        sweep = pd.read_csv(sweep_path, keep_default_na=False)
+        for col in sweep.columns:
+            if col not in ("tier", "sim_id"):
+                sweep[col] = pd.to_numeric(sweep[col], errors="coerce")
+        t25 = table25_signal_sweep(sweep)
+    else:
+        t25 = pd.DataFrame()
+    t25.to_csv(OUT / "table25_synthetic_signal_sweep_corrected.csv", index=False)
+    print(f"→ {OUT / 'table25_synthetic_signal_sweep_corrected.csv'}")
+    print(t25.to_string(index=False))
+
+
+
+
 if __name__ == "__main__":
-    main()
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--mode", choices=["dgp", "rebuild", "corrected_tables"],
+                    default="dgp",
+                    help="dgp = legacy synthetic tables; rebuild = corrected MDD/Calmar "
+                         "scenarios A/B/CMP (Tables 23/24); corrected_tables = Table 25 sweep.")
+    ap.add_argument("--fast", action="store_true")
+    ap.add_argument("--full", action="store_true")
+    args, _ = ap.parse_known_args()
+
+    if args.mode == "rebuild":
+        # Pretend the rebuild script saw its own argv (it parses --fast/--full).
+        import sys as _sys
+        _sys.argv = [_sys.argv[0]] + ([_a for _a in ["--fast"] if args.fast]
+                                       + [_a for _a in ["--full"] if args.full])
+        main_rebuild()
+    elif args.mode == "corrected_tables":
+        main_corrected_tables()
+    else:
+        main_dgp_rebuild()

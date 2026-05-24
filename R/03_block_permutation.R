@@ -6,15 +6,19 @@
 #'   pooled across all 9 assets and per asset class.
 #'
 #' Cross-validates (Python/Rust source):
-#'   - block_perm_rs/src/main.rs (produces the *_rank columns)
-#'   - block_perm_analysis.py (pooled sweep over block sizes)
+#'   - rust/block_perm_path/src/main.rs (produces the *_mdd_rank columns)
+#'   - block_perm_analysis.py (pooled sweep over block sizes, MDD-based)
 #'
 #' Paper artifact reproduced:
-#'   - Table 19 (block permutation MC test, all 9 instruments, b=1..20)
+#'   - Corrected Table 19 (block permutation MC test, all 9 instruments,
+#'     b=1..20; path-dependent MDD rank).
 #'
 #' Method:
-#'   For each asset read block_perm_<asset>.csv with columns
-#'     iid_rank, block2_rank, block3_rank, block5_rank, block10_rank, block20_rank.
+#'   For each asset read block_perm_path_<asset>.csv with columns
+#'     iid_mdd_rank, block2_mdd_rank, block3_mdd_rank,
+#'     block5_mdd_rank, block10_mdd_rank, block20_mdd_rank.
+#'   Corrected: switched from {iid,block*}_rank (ROI/sum-based) to
+#'   {iid,block*}_mdd_rank (path-dependent MDD; paper Section sec:fp-pitfall).
 #'   Merge with raw_data/<asset>_window_pairs.csv for OOS profitability
 #'   (baseline_oos_pf > 1.0).
 #'   For each block size b, compute:
@@ -46,12 +50,12 @@ set.seed(42)
 out_dir <- ensure_out()
 
 BLOCK_COLS <- c(
-  "iid (b=1)"  = "iid_rank",
-  "block b=2"  = "block2_rank",
-  "block b=3"  = "block3_rank",
-  "block b=5"  = "block5_rank",
-  "block b=10" = "block10_rank",
-  "block b=20" = "block20_rank"
+  "iid (b=1)"  = "iid_mdd_rank",
+  "block b=2"  = "block2_mdd_rank",
+  "block b=3"  = "block3_mdd_rank",
+  "block b=5"  = "block5_mdd_rank",
+  "block b=10" = "block10_mdd_rank",
+  "block b=20" = "block20_mdd_rank"
 )
 
 ASSET_CLASS <- c(
@@ -113,8 +117,8 @@ for (asset in ALL_ASSETS) {
   }
 
   combined[[asset]] <- m[, .(asset_class, oos_prof,
-                              iid_rank, block2_rank, block3_rank,
-                              block5_rank, block10_rank, block20_rank)]
+                              iid_mdd_rank, block2_mdd_rank, block3_mdd_rank,
+                              block5_mdd_rank, block10_mdd_rank, block20_mdd_rank)]
 }
 
 per_asset_dt <- rbindlist(per_asset, fill = TRUE)

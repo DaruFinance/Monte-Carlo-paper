@@ -2,7 +2,7 @@
 name = "strat_corr"
 version = "0.1.0"
 edition = "2021"
-authors = ["anonymous"]
+authors = ["Daniel Gatto"]
 description = "Sparse bar-level PnL correlation + rolling cross-asset correlation tensor"
 
 [dependencies]
