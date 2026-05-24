@@ -1,0 +1,164 @@
+\begin{table}[ht]
+\centering
+\caption{Corrected Table~16: MC lift at elevated transaction cost levels, using path-dependent MC filters (MC-MDD/Calmar/Ulcer at the 50th percentile). The artefactual MC-ROI$^*$ filter row is included for reference. Pool = strategy-windows with the perturbation-specific IS PF\,$>$\,1; lift = MC+IS OOS PF\,$>$\,1 \% minus IS-only OOS PF\,$>$\,1 \%. Under the corrected filters, lift is near zero at every cost level on every asset, confirming that the cost-sensitivity conclusion of the original paper does not change qualitatively after the FP-summation correction.}
+\label{tab:cost_sensitivity_corrected}
+\small
+\begin{tabular}{llrrrrr}
+\toprule
+Asset & Cost Level / Filter & IS Pool & MC+IS Pool & IS OOS\% & MC+IS OOS\% & Lift (pp) \\
+\midrule
+BTC & Baseline (1x fee, 1x slip) / MC-MDD p50 & 429,409 & 225,615 & 34.00 & 33.82 & $-0.18$ \\
+BTC & \hspace{1em}MC-Calmar p50 & 429,409 & 226,144 & 34.00 & 33.83 & $-0.18$ \\
+BTC & \hspace{1em}MC-Ulcer p50 & 429,409 & 222,969 & 34.00 & 33.88 & $-0.12$ \\
+BTC & \hspace{1em}MC-ROI* p50 (art.) & 429,409 & 144,193 & 34.00 & 32.69 & $-1.31$ \\
+BTC & Fee+100\% (2x fee) / MC-MDD p50 & 303,249 & 159,904 & 27.82 & 27.51 & $-0.32$ \\
+BTC & \hspace{1em}MC-Calmar p50 & 303,249 & 160,368 & 27.82 & 27.53 & $-0.29$ \\
+BTC & \hspace{1em}MC-Ulcer p50 & 303,249 & 158,441 & 27.82 & 27.63 & $-0.19$ \\
+BTC & \hspace{1em}MC-ROI* p50 (art.) & 303,249 & 96,175 & 27.82 & 26.09 & $-1.74$ \\
+BTC & Slip+200\% (3x slip) / MC-MDD p50 & 279,619 & 147,458 & 26.87 & 26.54 & $-0.34$ \\
+BTC & \hspace{1em}MC-Calmar p50 & 279,619 & 147,913 & 26.87 & 26.56 & $-0.31$ \\
+BTC & \hspace{1em}MC-Ulcer p50 & 279,619 & 146,317 & 26.87 & 26.69 & $-0.19$ \\
+BTC & \hspace{1em}MC-ROI* p50 (art.) & 279,619 & 87,841 & 26.87 & 25.36 & $-1.51$ \\
+BTC & Entry+Indicator drift / MC-MDD p50 & 424,042 & 222,142 & 33.65 & 33.52 & $-0.12$ \\
+BTC & \hspace{1em}MC-Calmar p50 & 424,042 & 220,360 & 33.65 & 33.55 & $-0.10$ \\
+BTC & \hspace{1em}MC-Ulcer p50 & 424,042 & 218,942 & 33.65 & 33.52 & $-0.13$ \\
+BTC & \hspace{1em}MC-ROI* p50 (art.) & 424,042 & 145,684 & 33.65 & 32.49 & $-1.16$ \\
+\midrule
+DOGE & Baseline (1x fee, 1x slip) / MC-MDD p50 & 373,628 & 188,357 & 38.49 & 38.64 & $+0.15$ \\
+DOGE & \hspace{1em}MC-Calmar p50 & 373,628 & 188,737 & 38.49 & 38.66 & $+0.16$ \\
+DOGE & \hspace{1em}MC-Ulcer p50 & 373,628 & 187,577 & 38.49 & 38.77 & $+0.28$ \\
+DOGE & \hspace{1em}MC-ROI* p50 (art.) & 373,628 & 126,843 & 38.49 & 37.69 & $-0.80$ \\
+DOGE & Fee+100\% (2x fee) / MC-MDD p50 & 266,714 & 135,074 & 30.65 & 30.76 & $+0.11$ \\
+DOGE & \hspace{1em}MC-Calmar p50 & 266,714 & 135,397 & 30.65 & 30.79 & $+0.14$ \\
+DOGE & \hspace{1em}MC-Ulcer p50 & 266,714 & 134,832 & 30.65 & 30.85 & $+0.20$ \\
+DOGE & \hspace{1em}MC-ROI* p50 (art.) & 266,714 & 85,729 & 30.65 & 29.43 & $-1.21$ \\
+DOGE & Slip+200\% (3x slip) / MC-MDD p50 & 247,167 & 125,198 & 29.66 & 29.81 & $+0.16$ \\
+DOGE & \hspace{1em}MC-Calmar p50 & 247,167 & 125,521 & 29.66 & 29.85 & $+0.19$ \\
+DOGE & \hspace{1em}MC-Ulcer p50 & 247,167 & 125,043 & 29.66 & 29.94 & $+0.28$ \\
+DOGE & \hspace{1em}MC-ROI* p50 (art.) & 247,167 & 78,720 & 29.66 & 28.50 & $-1.16$ \\
+DOGE & Entry+Indicator drift / MC-MDD p50 & 361,689 & 182,796 & 38.81 & 38.96 & $+0.15$ \\
+DOGE & \hspace{1em}MC-Calmar p50 & 361,689 & 182,409 & 38.81 & 39.00 & $+0.19$ \\
+DOGE & \hspace{1em}MC-Ulcer p50 & 361,689 & 182,060 & 38.81 & 39.08 & $+0.27$ \\
+DOGE & \hspace{1em}MC-ROI* p50 (art.) & 361,689 & 126,097 & 38.81 & 37.84 & $-0.97$ \\
+\midrule
+BNB & Baseline (1x fee, 1x slip) / MC-MDD p50 & 475,457 & 239,920 & 31.32 & 31.05 & $-0.28$ \\
+BNB & \hspace{1em}MC-Calmar p50 & 475,457 & 240,474 & 31.32 & 31.06 & $-0.26$ \\
+BNB & \hspace{1em}MC-Ulcer p50 & 475,457 & 236,587 & 31.32 & 31.12 & $-0.21$ \\
+BNB & \hspace{1em}MC-ROI* p50 (art.) & 475,457 & 157,713 & 31.32 & 29.99 & $-1.33$ \\
+BNB & Fee+100\% (2x fee) / MC-MDD p50 & 319,244 & 160,749 & 25.59 & 25.11 & $-0.47$ \\
+BNB & \hspace{1em}MC-Calmar p50 & 319,244 & 161,242 & 25.59 & 25.15 & $-0.44$ \\
+BNB & \hspace{1em}MC-Ulcer p50 & 319,244 & 158,987 & 25.59 & 25.21 & $-0.38$ \\
+BNB & \hspace{1em}MC-ROI* p50 (art.) & 319,244 & 98,470 & 25.59 & 24.11 & $-1.48$ \\
+BNB & Slip+200\% (3x slip) / MC-MDD p50 & 291,407 & 146,691 & 24.69 & 24.28 & $-0.41$ \\
+BNB & \hspace{1em}MC-Calmar p50 & 291,407 & 147,200 & 24.69 & 24.32 & $-0.37$ \\
+BNB & \hspace{1em}MC-Ulcer p50 & 291,407 & 145,266 & 24.69 & 24.33 & $-0.36$ \\
+BNB & \hspace{1em}MC-ROI* p50 (art.) & 291,407 & 88,648 & 24.69 & 23.31 & $-1.38$ \\
+BNB & Entry+Indicator drift / MC-MDD p50 & 490,932 & 247,870 & 31.22 & 31.08 & $-0.15$ \\
+BNB & \hspace{1em}MC-Calmar p50 & 490,932 & 246,886 & 31.22 & 31.10 & $-0.12$ \\
+BNB & \hspace{1em}MC-Ulcer p50 & 490,932 & 244,671 & 31.22 & 31.16 & $-0.07$ \\
+BNB & \hspace{1em}MC-ROI* p50 (art.) & 490,932 & 167,026 & 31.22 & 29.88 & $-1.34$ \\
+\midrule
+SOL & Baseline (1x fee, 1x slip) / MC-MDD p50 & 144,261 & 73,110 & 41.27 & 41.19 & $-0.08$ \\
+SOL & \hspace{1em}MC-Calmar p50 & 144,261 & 73,497 & 41.27 & 41.25 & $-0.02$ \\
+SOL & \hspace{1em}MC-Ulcer p50 & 144,261 & 74,470 & 41.27 & 41.15 & $-0.12$ \\
+SOL & \hspace{1em}MC-ROI* p50 (art.) & 144,261 & 49,383 & 41.27 & 39.94 & $-1.33$ \\
+SOL & Fee+100\% (2x fee) / MC-MDD p50 & 114,027 & 57,951 & 34.83 & 34.44 & $-0.39$ \\
+SOL & \hspace{1em}MC-Calmar p50 & 114,027 & 58,313 & 34.83 & 34.54 & $-0.29$ \\
+SOL & \hspace{1em}MC-Ulcer p50 & 114,027 & 59,012 & 34.83 & 34.47 & $-0.36$ \\
+SOL & \hspace{1em}MC-ROI* p50 (art.) & 114,027 & 37,437 & 34.83 & 33.07 & $-1.76$ \\
+SOL & Slip+200\% (3x slip) / MC-MDD p50 & 108,844 & 55,316 & 33.78 & 33.53 & $-0.25$ \\
+SOL & \hspace{1em}MC-Calmar p50 & 108,844 & 55,679 & 33.78 & 33.62 & $-0.16$ \\
+SOL & \hspace{1em}MC-Ulcer p50 & 108,844 & 56,385 & 33.78 & 33.47 & $-0.31$ \\
+SOL & \hspace{1em}MC-ROI* p50 (art.) & 108,844 & 35,433 & 33.78 & 32.28 & $-1.50$ \\
+SOL & Entry+Indicator drift / MC-MDD p50 & 139,009 & 70,450 & 40.80 & 41.02 & $+0.21$ \\
+SOL & \hspace{1em}MC-Calmar p50 & 139,009 & 70,704 & 40.80 & 40.82 & $+0.01$ \\
+SOL & \hspace{1em}MC-Ulcer p50 & 139,009 & 71,368 & 40.80 & 40.91 & $+0.11$ \\
+SOL & \hspace{1em}MC-ROI* p50 (art.) & 139,009 & 48,681 & 40.80 & 39.47 & $-1.34$ \\
+\midrule
+EURUSD & Baseline (1x fee, 1x slip) / MC-MDD p50 & 76,706 & 28,042 & 21.39 & 17.27 & $-4.11$ \\
+EURUSD & \hspace{1em}MC-Calmar p50 & 76,706 & 31,559 & 21.39 & 18.65 & $-2.74$ \\
+EURUSD & \hspace{1em}MC-Ulcer p50 & 76,706 & 34,484 & 21.39 & 19.41 & $-1.98$ \\
+EURUSD & \hspace{1em}MC-ROI* p50 (art.) & 76,706 & 23,587 & 21.39 & 19.69 & $-1.70$ \\
+EURUSD & Fee+100\% (2x fee) / MC-MDD p50 & 76,522 & 27,951 & 21.40 & 17.29 & $-4.12$ \\
+EURUSD & \hspace{1em}MC-Calmar p50 & 76,522 & 31,468 & 21.40 & 18.66 & $-2.75$ \\
+EURUSD & \hspace{1em}MC-Ulcer p50 & 76,522 & 34,390 & 21.40 & 19.43 & $-1.98$ \\
+EURUSD & \hspace{1em}MC-ROI* p50 (art.) & 76,522 & 23,499 & 21.40 & 19.69 & $-1.71$ \\
+EURUSD & Slip+200\% (3x slip) / MC-MDD p50 & 76,706 & 28,042 & 21.39 & 17.27 & $-4.11$ \\
+EURUSD & \hspace{1em}MC-Calmar p50 & 76,706 & 31,559 & 21.39 & 18.65 & $-2.74$ \\
+EURUSD & \hspace{1em}MC-Ulcer p50 & 76,706 & 34,484 & 21.39 & 19.41 & $-1.98$ \\
+EURUSD & \hspace{1em}MC-ROI* p50 (art.) & 76,706 & 23,587 & 21.39 & 19.69 & $-1.70$ \\
+EURUSD & Entry+Indicator drift / MC-MDD p50 & 84,116 & 35,770 & 21.52 & 19.47 & $-2.04$ \\
+EURUSD & \hspace{1em}MC-Calmar p50 & 84,116 & 38,634 & 21.52 & 20.17 & $-1.35$ \\
+EURUSD & \hspace{1em}MC-Ulcer p50 & 84,116 & 39,668 & 21.52 & 20.32 & $-1.20$ \\
+EURUSD & \hspace{1em}MC-ROI* p50 (art.) & 84,116 & 24,224 & 21.52 & 20.77 & $-0.74$ \\
+\midrule
+USDJPY & Baseline (1x fee, 1x slip) / MC-MDD p50 & 67,838 & 22,797 & 20.92 & 17.15 & $-3.77$ \\
+USDJPY & \hspace{1em}MC-Calmar p50 & 67,838 & 26,546 & 20.92 & 18.50 & $-2.42$ \\
+USDJPY & \hspace{1em}MC-Ulcer p50 & 67,838 & 29,202 & 20.92 & 19.16 & $-1.76$ \\
+USDJPY & \hspace{1em}MC-ROI* p50 (art.) & 67,838 & 20,305 & 20.92 & 19.20 & $-1.72$ \\
+USDJPY & Fee+100\% (2x fee) / MC-MDD p50 & 67,707 & 22,736 & 20.93 & 17.17 & $-3.76$ \\
+USDJPY & \hspace{1em}MC-Calmar p50 & 67,707 & 26,485 & 20.93 & 18.52 & $-2.41$ \\
+USDJPY & \hspace{1em}MC-Ulcer p50 & 67,707 & 29,144 & 20.93 & 19.17 & $-1.76$ \\
+USDJPY & \hspace{1em}MC-ROI* p50 (art.) & 67,707 & 20,235 & 20.93 & 19.23 & $-1.71$ \\
+USDJPY & Slip+200\% (3x slip) / MC-MDD p50 & 67,838 & 22,797 & 20.92 & 17.15 & $-3.77$ \\
+USDJPY & \hspace{1em}MC-Calmar p50 & 67,838 & 26,546 & 20.92 & 18.50 & $-2.42$ \\
+USDJPY & \hspace{1em}MC-Ulcer p50 & 67,838 & 29,202 & 20.92 & 19.16 & $-1.76$ \\
+USDJPY & \hspace{1em}MC-ROI* p50 (art.) & 67,838 & 20,305 & 20.92 & 19.20 & $-1.72$ \\
+USDJPY & Entry+Indicator drift / MC-MDD p50 & 74,343 & 30,534 & 21.93 & 19.84 & $-2.10$ \\
+USDJPY & \hspace{1em}MC-Calmar p50 & 74,343 & 33,102 & 21.93 & 20.39 & $-1.55$ \\
+USDJPY & \hspace{1em}MC-Ulcer p50 & 74,343 & 33,908 & 21.93 & 20.58 & $-1.36$ \\
+USDJPY & \hspace{1em}MC-ROI* p50 (art.) & 74,343 & 21,155 & 21.93 & 21.11 & $-0.82$ \\
+\midrule
+EURGBP & Baseline (1x fee, 1x slip) / MC-MDD p50 & 201,101 & 79,380 & 35.35 & 33.38 & $-1.97$ \\
+EURGBP & \hspace{1em}MC-Calmar p50 & 201,101 & 85,986 & 35.35 & 34.12 & $-1.23$ \\
+EURGBP & \hspace{1em}MC-Ulcer p50 & 201,101 & 91,720 & 35.35 & 34.18 & $-1.17$ \\
+EURGBP & \hspace{1em}MC-ROI* p50 (art.) & 201,101 & 60,634 & 35.35 & 34.66 & $-0.69$ \\
+EURGBP & Fee+100\% (2x fee) / MC-MDD p50 & 200,477 & 79,078 & 35.32 & 33.34 & $-1.97$ \\
+EURGBP & \hspace{1em}MC-Calmar p50 & 200,477 & 85,684 & 35.32 & 34.09 & $-1.23$ \\
+EURGBP & \hspace{1em}MC-Ulcer p50 & 200,477 & 91,410 & 35.32 & 34.16 & $-1.15$ \\
+EURGBP & \hspace{1em}MC-ROI* p50 (art.) & 200,477 & 60,347 & 35.32 & 34.63 & $-0.69$ \\
+EURGBP & Slip+200\% (3x slip) / MC-MDD p50 & 201,101 & 79,380 & 35.35 & 33.38 & $-1.97$ \\
+EURGBP & \hspace{1em}MC-Calmar p50 & 201,101 & 85,986 & 35.35 & 34.12 & $-1.23$ \\
+EURGBP & \hspace{1em}MC-Ulcer p50 & 201,101 & 91,720 & 35.35 & 34.18 & $-1.17$ \\
+EURGBP & \hspace{1em}MC-ROI* p50 (art.) & 201,101 & 60,634 & 35.35 & 34.66 & $-0.69$ \\
+EURGBP & Entry+Indicator drift / MC-MDD p50 & 219,279 & 93,229 & 36.14 & 34.70 & $-1.44$ \\
+EURGBP & \hspace{1em}MC-Calmar p50 & 219,279 & 101,051 & 36.14 & 35.66 & $-0.48$ \\
+EURGBP & \hspace{1em}MC-Ulcer p50 & 219,279 & 102,395 & 36.14 & 35.20 & $-0.94$ \\
+EURGBP & \hspace{1em}MC-ROI* p50 (art.) & 219,279 & 65,302 & 36.14 & 35.74 & $-0.40$ \\
+\midrule
+XAUUSD & Baseline (1x fee, 1x slip) / MC-MDD p50 & 657,969 & 348,490 & 55.70 & 55.73 & $+0.02$ \\
+XAUUSD & \hspace{1em}MC-Calmar p50 & 657,969 & 348,916 & 55.70 & 55.72 & $+0.02$ \\
+XAUUSD & \hspace{1em}MC-Ulcer p50 & 657,969 & 347,345 & 55.70 & 55.67 & $-0.03$ \\
+XAUUSD & \hspace{1em}MC-ROI* p50 (art.) & 657,969 & 179,089 & 55.70 & 55.13 & $-0.58$ \\
+XAUUSD & Fee+100\% (2x fee) / MC-MDD p50 & 628,502 & 332,601 & 52.40 & 52.36 & $-0.05$ \\
+XAUUSD & \hspace{1em}MC-Calmar p50 & 628,502 & 333,025 & 52.40 & 52.35 & $-0.05$ \\
+XAUUSD & \hspace{1em}MC-Ulcer p50 & 628,502 & 331,816 & 52.40 & 52.30 & $-0.11$ \\
+XAUUSD & \hspace{1em}MC-ROI* p50 (art.) & 628,502 & 165,986 & 52.40 & 51.87 & $-0.53$ \\
+XAUUSD & Slip+200\% (3x slip) / MC-MDD p50 & 657,969 & 348,490 & 55.70 & 55.73 & $+0.02$ \\
+XAUUSD & \hspace{1em}MC-Calmar p50 & 657,969 & 348,916 & 55.70 & 55.72 & $+0.02$ \\
+XAUUSD & \hspace{1em}MC-Ulcer p50 & 657,969 & 347,345 & 55.70 & 55.67 & $-0.03$ \\
+XAUUSD & \hspace{1em}MC-ROI* p50 (art.) & 657,969 & 179,089 & 55.70 & 55.13 & $-0.58$ \\
+XAUUSD & Entry+Indicator drift / MC-MDD p50 & 655,721 & 346,514 & 55.22 & 55.31 & $+0.08$ \\
+XAUUSD & \hspace{1em}MC-Calmar p50 & 655,721 & 344,018 & 55.22 & 55.30 & $+0.08$ \\
+XAUUSD & \hspace{1em}MC-Ulcer p50 & 655,721 & 345,574 & 55.22 & 55.24 & $+0.01$ \\
+XAUUSD & \hspace{1em}MC-ROI* p50 (art.) & 655,721 & 179,339 & 55.22 & 54.92 & $-0.30$ \\
+\midrule
+WTI & Baseline (1x fee, 1x slip) / MC-MDD p50 & 584,731 & 298,388 & 43.76 & 43.98 & $+0.22$ \\
+WTI & \hspace{1em}MC-Calmar p50 & 584,731 & 299,181 & 43.76 & 43.99 & $+0.23$ \\
+WTI & \hspace{1em}MC-Ulcer p50 & 584,731 & 298,506 & 43.76 & 44.01 & $+0.25$ \\
+WTI & \hspace{1em}MC-ROI* p50 (art.) & 584,731 & 166,445 & 43.76 & 43.58 & $-0.18$ \\
+WTI & Fee+100\% (2x fee) / MC-MDD p50 & 474,114 & 241,208 & 35.51 & 35.71 & $+0.20$ \\
+WTI & \hspace{1em}MC-Calmar p50 & 474,114 & 241,978 & 35.51 & 35.73 & $+0.22$ \\
+WTI & \hspace{1em}MC-Ulcer p50 & 474,114 & 241,533 & 35.51 & 35.75 & $+0.24$ \\
+WTI & \hspace{1em}MC-ROI* p50 (art.) & 474,114 & 121,461 & 35.51 & 35.44 & $-0.07$ \\
+WTI & Slip+200\% (3x slip) / MC-MDD p50 & 584,731 & 298,388 & 43.76 & 43.98 & $+0.22$ \\
+WTI & \hspace{1em}MC-Calmar p50 & 584,731 & 299,181 & 43.76 & 43.99 & $+0.23$ \\
+WTI & \hspace{1em}MC-Ulcer p50 & 584,731 & 298,506 & 43.76 & 44.01 & $+0.25$ \\
+WTI & \hspace{1em}MC-ROI* p50 (art.) & 584,731 & 166,445 & 43.76 & 43.58 & $-0.18$ \\
+WTI & Entry+Indicator drift / MC-MDD p50 & 574,807 & 293,695 & 43.21 & 43.30 & $+0.09$ \\
+WTI & \hspace{1em}MC-Calmar p50 & 574,807 & 291,871 & 43.21 & 43.39 & $+0.18$ \\
+WTI & \hspace{1em}MC-Ulcer p50 & 574,807 & 293,682 & 43.21 & 43.31 & $+0.10$ \\
+WTI & \hspace{1em}MC-ROI* p50 (art.) & 574,807 & 164,443 & 43.21 & 43.06 & $-0.15$ \\
+\bottomrule
+\end{tabular}
+\end{table}

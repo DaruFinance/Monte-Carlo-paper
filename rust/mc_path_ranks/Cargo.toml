@@ -1,0 +1,20 @@
+[package]
+name = "mc_path_ranks"
+version = "0.1.0"
+edition = "2021"
+authors = ["Daniel Gatto"]
+description = "Corrected MC percentile ranks for trading-strategy walk-forward (MDD/Calmar/Ulcer; ROI shown as artefact for comparison)."
+license = "MIT"
+
+[dependencies]
+rayon = "1.10"
+rand = { version = "0.8", features = ["small_rng"] }
+walkdir = "2"
+
+[[bin]]
+name = "mc_path_ranks"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = 3
+lto = true

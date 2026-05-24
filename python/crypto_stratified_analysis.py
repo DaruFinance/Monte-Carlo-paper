@@ -1,304 +1,173 @@
 """
-Crypto stratified analyses for Paper 3 (Scripts_Clean addition).
+Rebuild stratified-analysis tables that previously consumed the broken MC rank:
 
-Produces four tables cited inline in paper_redacted.tex that the original
-`full_analysis.py` release lost:
+  - Table 8  : MC by family (mean MC rank within each technical-indicator family)
+  - Table 17 : MC selection bias (does the MC filter select for IS-PF-passers?)
+  - Table 18 : PF stratified crypto (OOS PF distribution stratified by MC filter)
+  - Table 16 : cost sensitivity (filter lift under increased fees/slippage)
 
-  - Table 6  (tab:continuous_sharpe)    -> results/tables/continuous_sharpe.csv
-  - Table 8  (tab:mc_by_family)         -> results/tables/mc_by_family.csv
-  - Table 17 (tab:mc_selection_bias)    -> results/tables/mc_selection_bias.csv
-  - Table 18 (tab:pf_stratified)        -> results/tables/pf_stratified_crypto.csv
+Outputs land in results/tables/. We use the path-dependent MC-MDD and
+MC-Calmar ranks throughout, with the artefactual MC-ROI* shown for transparency.
 
-All four are deterministic aggregations of:
-
-  - results/raw_data/<asset>_window_pairs.csv  (IS/OOS PF + Sharpe per strategy-window)
-  - results/raw_data/<asset>_mc_perwindow.csv  (MC ROI/Sharpe/PF percentile ranks)
-
-No random sampling, no bootstraps: identical on every run given identical inputs.
+Requires results/raw_data/<asset>_corrected_ranks.csv + <asset>_window_pairs.csv.
 """
+from __future__ import annotations
 import os
 import re
 from pathlib import Path
-
 import numpy as np
 import pandas as pd
 
 ROOT = Path(os.environ.get("MC_PAPER_DATA", Path(__file__).resolve().parents[1]))
-RAW = ROOT / "results" / "raw_data"
-TAB = ROOT / "results" / "tables"
-TAB.mkdir(parents=True, exist_ok=True)
+DATA = ROOT / "results" / "raw_data"
+OUT = ROOT / "results" / "tables"
+OUT.mkdir(parents=True, exist_ok=True)
 
-CRYPTO = ['BTC', 'DOGE', 'BNB', 'SOL']
-FOREX = ['EUR/USD', 'USD/JPY', 'EUR/GBP']
-COMMODITY = ['XAU/USD', 'WTI']
-NINE = CRYPTO + FOREX + COMMODITY
-
-ASSET_FILE = {
-    'BTC': 'btc',     'DOGE': 'doge', 'BNB': 'bnb', 'SOL': 'sol',
-    'EUR/USD': 'eurusd', 'USD/JPY': 'usdjpy', 'EUR/GBP': 'eurgbp',
-    'XAU/USD': 'xauusd', 'WTI': 'wti',
-}
-
-# Family detection mirrors correlation_analysis/strategy_correlations.py.
-# Order matters: longer prefixes first so MACD(24;52) doesn't get caught
-# by a bare 'MACD' rule and RSI_LEVEL isn't shadowed by 'RSI'.
-MACD_RE = re.compile(r'^MACD\((\d+);(\d+)\)')
+ASSETS = [("BTC","btc"), ("DOGE","doge"), ("BNB","bnb"), ("SOL","sol"),
+          ("EUR/USD","eurusd"), ("USD/JPY","usdjpy"), ("EUR/GBP","eurgbp"),
+          ("XAU/USD","xauusd"), ("WTI","wti")]
+FAMILIES = ["ATR", "EMA", "MACD", "PPO", "RSI", "RSI_LEVEL", "SMA", "STOCHK"]
 
 
-def get_family(name: str) -> str:
-    """Return the indicator family tag used in Table 8."""
-    if name.startswith('MACD'):
-        m = MACD_RE.match(name) or re.match(r'^MACD_(\d+)_(\d+)_(\d+)', name)
-        if m:
-            fast, slow = int(m.group(1)), int(m.group(2))
-            return f'MACD({fast};{slow})'
-        # Also catch strategies that encode MACD params with underscores
-        # in the strategy name, e.g. "MACD_12_26_9_...".
-        parts = name.split('_')
-        if len(parts) >= 3 and parts[0] == 'MACD':
-            try:
-                return f'MACD({int(parts[1])};{int(parts[2])})'
-            except ValueError:
-                return 'MACD'
-        return 'MACD'
-    for pref in ['ATR', 'EMA', 'SMA', 'PPO', 'RSI_LEVEL', 'RSI', 'STOCHK']:
-        if name.startswith(pref):
-            return pref
-    return 'OTHER'
+def family_of(strategy_name: str) -> str:
+    """Recover indicator family from strategy name. Strategies are typically
+    named '<FAMILY>_<...>' or '<F1>_x_<F2>_<...>'; we use the leading token."""
+    s = strategy_name.strip().strip('"')
+    head = re.split(r"[_\-]", s)[0]
+    head = head.upper()
+    # special handling: RSI_LEVEL appears as 'RSI' + ... + 'LEVEL' or as a distinct family
+    if head == "RSI" and "_LEVEL" in s.upper():
+        return "RSI_LEVEL"
+    return head if head in FAMILIES else "OTHER"
 
 
-def load_merged(asset: str) -> pd.DataFrame:
-    wp = pd.read_csv(RAW / f'{ASSET_FILE[asset]}_window_pairs.csv')
-    mc = pd.read_csv(RAW / f'{ASSET_FILE[asset]}_mc_perwindow.csv')
-    mc['window_i'] = mc['window'].str.replace('W', '', regex=False).astype(int)
-    mc_cols = ['strategy', 'window_i', 'n_trades',
-               'roi_pct_rank', 'sharpe_pct_rank', 'pf_pct_rank']
-    return pd.merge(wp, mc[mc_cols], on=['strategy', 'window_i'], how='inner')
-
-
-# ---------------------------------------------------------------------------
-# Table 8: MC-ROI p50 lift disaggregated by indicator family (crypto, pooled)
-# ---------------------------------------------------------------------------
-def table_mc_by_family():
-    frames = []
-    for a in CRYPTO:
-        m = load_merged(a)
-        m['family'] = m['strategy'].apply(get_family)
-        frames.append(m[['family', 'baseline_oos_pf', 'roi_pct_rank']])
-    pooled = pd.concat(frames, ignore_index=True)
-    pooled = pooled[pooled['baseline_oos_pf'].notna()].copy()
-    pooled['oos_prof'] = (pooled['baseline_oos_pf'] > 1.0).astype(float)
-    pooled['mc_pass'] = pooled['roi_pct_rank'] >= 50
-
-    rows = []
-    for family, g in pooled.groupby('family'):
-        n = len(g)
-        base = g['oos_prof'].mean() * 100
-        mc_pass = g.loc[g['mc_pass'], 'oos_prof'].mean() * 100
-        mc_fail = g.loc[~g['mc_pass'], 'oos_prof'].mean() * 100
-        lift = mc_pass - base
-        rows.append({
-            'Indicator Family': family,
-            'N': int(n),
-            'Baseline %': round(base, 1),
-            'MC-Pass %': round(mc_pass, 1),
-            'MC-Fail %': round(mc_fail, 1),
-            'Lift (pp)': round(lift, 2),
-        })
-    df = pd.DataFrame(rows).sort_values('Lift (pp)', ascending=True)
-    df = df[df['Indicator Family'] != 'OTHER'].reset_index(drop=True)
-    df.to_csv(TAB / 'mc_by_family.csv', index=False)
-    print(f"  -> {TAB / 'mc_by_family.csv'}  ({len(df)} families)")
+def load_merged(short: str) -> pd.DataFrame:
+    rp = DATA / f"{short}_corrected_ranks.csv"
+    wp = DATA / f"{short}_window_pairs.csv"
+    if not rp.exists() or not wp.exists(): return pd.DataFrame()
+    r = pd.read_csv(rp)
+    r["window_i"] = r["window"].str.replace("W", "").astype(int)
+    w = pd.read_csv(wp)
+    df = pd.merge(w, r[["strategy","window_i","n_trades","actual_roi","actual_mdd",
+                        "actual_calmar","actual_ulcer","roi_rank_broken","mdd_rank",
+                        "calmar_rank","ulcer_rank"]], on=["strategy","window_i"])
+    df["family"] = df["strategy"].apply(family_of)
     return df
 
 
-# ---------------------------------------------------------------------------
-# Table 17: MC selection bias (IS-profitable only, pooled crypto)
-# ---------------------------------------------------------------------------
-def table_mc_selection_bias():
-    """Table 17. Paper-reported IS PF means (1.50 vs 2.10) use an IS PF
-    computation that cannot be exactly recovered from the committed release;
-    the values here (pooled mean over strategy-windows) preserve direction
-    and sign but compress the spread. OOS profitability values match paper
-    within ~1 pp. See /home/daru/rerun_workspace/FINDINGS_v2.md for detail.
-    """
-    frames = []
-    for a in CRYPTO:
-        m = load_merged(a)
-        m = m[m['baseline_oos_pf'].notna()
-              & (m['baseline_is_pf'] > 1.0)
-              & (m['baseline_oos_trades'] >= 10)].copy()
-        frames.append(m[['baseline_is_pf', 'baseline_oos_pf', 'roi_pct_rank']]
-                      .assign(asset=a))
-    pooled = pd.concat(frames, ignore_index=True)
-    pooled = pooled[np.isfinite(pooled['baseline_is_pf']) &
-                    np.isfinite(pooled['baseline_oos_pf'])]
-    # Paper values ("1.50 vs 2.10") correspond to a PF cap ≈ 5 before
-    # averaging — without it, a handful of strategies with 10-trade PFs
-    # approaching infinity dominate the mean. The cap is applied only to
-    # the reported mean; the OOS profitability (binary PF > 1) is cap-free.
-    pooled['is_pf_capped'] = pooled['baseline_is_pf'].clip(upper=5.0)
-    pooled['oos_pf_capped'] = pooled['baseline_oos_pf'].clip(upper=5.0)
-    pooled['oos_prof'] = (pooled['baseline_oos_pf'] > 1.0).astype(float)
-    pooled['mc_pass'] = pooled['roi_pct_rank'] >= 50
-
-    def agg(sub):
-        return {
-            'N': int(len(sub)),
-            'Mean IS PF': round(sub['is_pf_capped'].mean(), 2),
-            'OOS Profitability %': round(sub['oos_prof'].mean() * 100, 1),
-            'OOS/IS PF ratio': round(
-                sub['oos_pf_capped'].mean() / sub['is_pf_capped'].mean(), 3),
-        }
-
-    mcp = agg(pooled[pooled['mc_pass']])
-    mcr = agg(pooled[~pooled['mc_pass']])
-    rows = [
-        {'Metric': 'N', 'MC-Filtered (rank>=50)': mcp['N'],
-         'MC-Rejected (rank<50)': mcr['N']},
-        {'Metric': 'Mean IS Profit Factor',
-         'MC-Filtered (rank>=50)': mcp['Mean IS PF'],
-         'MC-Rejected (rank<50)': mcr['Mean IS PF']},
-        {'Metric': 'OOS Profitability (%)',
-         'MC-Filtered (rank>=50)': mcp['OOS Profitability %'],
-         'MC-Rejected (rank<50)': mcr['OOS Profitability %']},
-        {'Metric': 'OOS/IS PF Ratio',
-         'MC-Filtered (rank>=50)': mcp['OOS/IS PF ratio'],
-         'MC-Rejected (rank<50)': mcr['OOS/IS PF ratio']},
-    ]
+# ----------------------------------------------------------------------
+# Table 8: MC rank means by strategy family
+# ----------------------------------------------------------------------
+def table8_mc_by_family():
+    rows = []
+    for asset, short in ASSETS:
+        m = load_merged(short)
+        if len(m) == 0: continue
+        for fam, g in m.groupby("family"):
+            rows.append({
+                "Asset": asset, "Family": fam, "N strat-windows": len(g),
+                "Mean MC-MDD":     round(g["mdd_rank"].mean(), 2),
+                "Mean MC-Calmar":  round(g["calmar_rank"].mean(), 2),
+                "Mean MC-Ulcer":   round(g["ulcer_rank"].mean(), 2),
+                "Mean MC-ROI*":    round(g["roi_rank_broken"].mean(), 2),
+                "Same-win OOS Prof%": round((g["baseline_oos_pf"] > 1).mean()*100, 2),
+            })
     df = pd.DataFrame(rows)
-    df.to_csv(TAB / 'mc_selection_bias.csv', index=False)
-    print(f"  -> {TAB / 'mc_selection_bias.csv'}")
+    df.to_csv(OUT / "table8_mc_by_family_corrected.csv", index=False)
+    print(f"→ {OUT / 'table8_mc_by_family_corrected.csv'}  ({len(df)} rows)")
     return df
 
 
-# ---------------------------------------------------------------------------
-# Table 18: IS PF-stratified MC-ROI p50 lift (crypto, IS-profitable only)
-# ---------------------------------------------------------------------------
-PF_BINS = [(1.0, 1.1), (1.1, 1.2), (1.2, 1.5),
-           (1.5, 2.0), (2.0, 3.0), (3.0, np.inf)]
-PF_LABELS = ['[1.0, 1.1)', '[1.1, 1.2)', '[1.2, 1.5)',
-             '[1.5, 2.0)', '[2.0, 3.0)', '[3.0, inf)']
-
-
-def _stratified(pool_df: pd.DataFrame) -> pd.DataFrame:
+# ----------------------------------------------------------------------
+# Table 17: MC selection bias
+# Does the MC filter preferentially keep strategies that also pass IS PF>1?
+# If MC carries information independent of IS profitability, the pass rate
+# inside the IS-PF>1 bucket should equal the pass rate inside the IS-PF<=1
+# bucket. Departures indicate that MC is partially a proxy for IS PF.
+# ----------------------------------------------------------------------
+def table17_mc_selection_bias():
     rows = []
-    for (lo, hi), lbl in zip(PF_BINS, PF_LABELS):
-        g = pool_df[(pool_df['baseline_is_pf'] >= lo) &
-                    (pool_df['baseline_is_pf'] < hi)]
-        if len(g) == 0:
-            continue
-        base = g['oos_prof'].mean() * 100
-        mp = g.loc[g['mc_pass'], 'oos_prof'].mean() * 100
-        mf = g.loc[~g['mc_pass'], 'oos_prof'].mean() * 100
-        rows.append({
-            'IS PF Bin': lbl,
-            'N': int(len(g)),
-            'Baseline OOS%': round(base, 1),
-            'MC-Pass OOS%': round(mp, 1),
-            'MC-Fail OOS%': round(mf, 1),
-            'Lift (pp)': round(mp - base, 2),
-        })
-    return pd.DataFrame(rows)
-
-
-def table_pf_stratified():
-    frames = []
-    for a in CRYPTO:
-        m = load_merged(a)
-        m = m[m['baseline_oos_pf'].notna() & (m['baseline_is_pf'] > 1.0)].copy()
-        frames.append(m[['baseline_is_pf', 'baseline_oos_pf', 'roi_pct_rank']])
-    pooled = pd.concat(frames, ignore_index=True)
-    pooled['oos_prof'] = (pooled['baseline_oos_pf'] > 1.0).astype(float)
-    pooled['mc_pass'] = pooled['roi_pct_rank'] >= 50
-    df = _stratified(pooled)
-    df.to_csv(TAB / 'pf_stratified_crypto.csv', index=False)
-    print(f"  -> {TAB / 'pf_stratified_crypto.csv'}  ({len(df)} bins)")
-    return df
-
-
-# ---------------------------------------------------------------------------
-# Table 6: Median OOS Sharpe by filter condition (all nine instruments)
-# ---------------------------------------------------------------------------
-FILTER_SPECS = [
-    ('No filter', None),
-    ('IS PF > 1', ('is_pf', None)),
-    ('MC-ROI >= p50', ('mc', 'roi_pct_rank', 50)),
-    ('MC-ROI >= p75', ('mc', 'roi_pct_rank', 75)),
-    ('MC-Sharpe >= p50', ('mc', 'sharpe_pct_rank', 50)),
-    ('MC-ROI p50 + PF>1', ('mc_is', 'roi_pct_rank', 50)),
-]
-
-
-def _apply_filter(m: pd.DataFrame, spec):
-    if spec is None:
-        return m
-    kind = spec[0]
-    if kind == 'is_pf':
-        return m[m['baseline_is_pf'] > 1.0]
-    if kind == 'mc':
-        _, col, thresh = spec
-        return m[m[col] >= thresh]
-    if kind == 'mc_is':
-        _, col, thresh = spec
-        return m[(m['baseline_is_pf'] > 1.0) & (m[col] >= thresh)]
-    raise ValueError(spec)
-
-
-def table_continuous_sharpe():
-    # Median OOS Sharpe on the merged (MC-eligible) strategy-window pool.
-    # Crypto values reproduce paper Table 6 exactly; forex/commodity drifts
-    # by ~0.02-0.05 (paper used a slightly different min-trades filter on
-    # the non-crypto raw_data generation; original filter is not recoverable
-    # from the release).
-    rows = []
-    for fname, spec in FILTER_SPECS:
-        row = {'Filter': fname}
-        for a in NINE:
-            m = load_merged(a)
-            m = m[m['baseline_oos_sharpe'].notna()]
-            sub = _apply_filter(m, spec)
-            if len(sub) == 0:
-                row[a] = np.nan
-                continue
-            row[a] = round(float(np.median(sub['baseline_oos_sharpe'])), 2)
-        rows.append(row)
+    for asset, short in ASSETS:
+        m = load_merged(short).dropna(subset=["baseline_is_pf"])
+        if len(m) == 0: continue
+        bl_pos = m["baseline_is_pf"] > 1.0
+        bl_neg = ~bl_pos
+        for col, mname in [("mdd_rank","MDD"), ("calmar_rank","Calmar"),
+                           ("ulcer_rank","Ulcer"), ("roi_rank_broken","ROI*")]:
+            for thr in (50, 75, 90):
+                pass_in_pos = (m.loc[bl_pos, col] >= thr).mean() * 100
+                pass_in_neg = (m.loc[bl_neg, col] >= thr).mean() * 100
+                rows.append({
+                    "Asset": asset, "MC Metric": mname, "Threshold": thr,
+                    "Pass rate | IS PF>1 (%)": round(pass_in_pos, 2),
+                    "Pass rate | IS PF<=1 (%)": round(pass_in_neg, 2),
+                    "Diff (pp)": round(pass_in_pos - pass_in_neg, 2),
+                    "Selection bias ratio": round(pass_in_pos / pass_in_neg, 3)
+                                            if pass_in_neg > 1e-6 else np.nan,
+                })
     df = pd.DataFrame(rows)
-
-    # Average Delta: mean lift vs 'No filter' baseline, averaged across the
-    # nine instruments. The PF>1 gate row and MC+IS row are computed vs the
-    # IS PF >1 baseline (matching the table footnote's dagger).
-    baseline = df.iloc[0][NINE].values.astype(float)
-    gate = df.iloc[1][NINE].values.astype(float)
-    def delta_row(vals, vs):
-        diffs = vals - vs
-        return round(float(np.nanmean(diffs)), 2)
-    df['Avg Delta'] = np.nan
-    df.loc[1, 'Avg Delta'] = delta_row(gate, baseline)
-    for i in range(2, len(df) - 1):
-        df.loc[i, 'Avg Delta'] = delta_row(
-            df.iloc[i][NINE].values.astype(float), baseline)
-    last = len(df) - 1  # MC+IS row: vs IS PF>1 baseline per footnote
-    df.loc[last, 'Avg Delta'] = delta_row(
-        df.iloc[last][NINE].values.astype(float), gate)
-
-    df.to_csv(TAB / 'continuous_sharpe.csv', index=False)
-    print(f"  -> {TAB / 'continuous_sharpe.csv'}  ({len(df)} filter rows)")
+    df.to_csv(OUT / "table17_mc_selection_bias_corrected.csv", index=False)
+    print(f"→ {OUT / 'table17_mc_selection_bias_corrected.csv'}  ({len(df)} rows)")
     return df
 
 
-def main():
-    print("=== Crypto stratified analyses (Tables 6, 8, 17, 18) ===")
-    print("\n[Table 8] MC-ROI p50 lift by indicator family (crypto pool)")
-    table_mc_by_family()
-    print("\n[Table 17] MC selection bias (IS-profitable only, pooled crypto)")
-    table_mc_selection_bias()
-    print("\n[Table 18] IS PF-stratified MC lift (crypto, IS-profitable)")
-    table_pf_stratified()
-    print("\n[Table 6] Median OOS Sharpe by filter condition (all 9 assets)")
-    table_continuous_sharpe()
-    print("\nDone.")
+# ----------------------------------------------------------------------
+# Table 18: OOS PF distribution stratified by MC filter
+# ----------------------------------------------------------------------
+def table18_pf_stratified():
+    rows = []
+    for asset, short in ASSETS:
+        m = load_merged(short).dropna(subset=["baseline_oos_pf"])
+        if len(m) == 0: continue
+        for col, mname in [("mdd_rank","MDD"), ("calmar_rank","Calmar"),
+                           ("ulcer_rank","Ulcer"), ("roi_rank_broken","ROI*")]:
+            for cond_name, cond in [
+                (f"{mname} all",   pd.Series(True, index=m.index)),
+                (f"{mname} ≥ p50", m[col] >= 50),
+                (f"{mname} ≥ p75", m[col] >= 75),
+                (f"{mname} ≥ p90", m[col] >= 90),
+                (f"{mname} < p50", m[col] < 50),
+            ]:
+                sub = m[cond]
+                if len(sub) == 0: continue
+                pf = sub["baseline_oos_pf"]
+                rows.append({
+                    "Asset": asset, "Filter": cond_name, "N": len(sub),
+                    "Median OOS PF": round(pf.median(), 4),
+                    "Mean OOS PF":   round(pf.mean(), 4),
+                    "% OOS PF>1":    round((pf > 1).mean()*100, 2),
+                    "Median OOS Sharpe": round(sub["baseline_oos_sharpe"].median(), 4),
+                })
+    df = pd.DataFrame(rows)
+    df.to_csv(OUT / "table18_pf_stratified_corrected.csv", index=False)
+    print(f"→ {OUT / 'table18_pf_stratified_corrected.csv'}  ({len(df)} rows)")
+    return df
 
 
-if __name__ == '__main__':
-    main()
+# ----------------------------------------------------------------------
+# Table 16: cost sensitivity — DOWNGRADED to a placeholder
+# Real cost sensitivity requires re-running strategies with perturbed
+# fee/slippage. We DON'T have those columns in trades.bin. Producing a
+# diagnostic note instead.
+# ----------------------------------------------------------------------
+def table16_cost_sensitivity_note():
+    note = (
+        "table16_cost_sensitivity: NOT REBUILT.\n\n"
+        "The original Table 16 used the {ent, fee, sli, entind}_is_pf perturbation\n"
+        "columns produced by re-running each strategy with elevated fee/slippage\n"
+        "parameters. Those columns are NOT in the toolkit's window_pairs CSVs\n"
+        "(they require the upstream backtester). To rebuild Table 16 in the\n"
+        "corrected paper, regenerate <asset>_window_pairs.csv with the ent/fee/\n"
+        "sli/entind perturbations included, then re-run full_analysis.py\n"
+        "with the appropriate filter rows enabled (they exist in the code but\n"
+        "are skipped when the perturbation columns are absent).\n"
+    )
+    (OUT / "table16_cost_sensitivity_NOTE.txt").write_text(note)
+    print(f"→ {OUT / 'table16_cost_sensitivity_NOTE.txt'}  (note only — needs upstream backtester)")
+
+
+if __name__ == "__main__":
+    table8_mc_by_family()
+    table17_mc_selection_bias()
+    table18_pf_stratified()
+    table16_cost_sensitivity_note()

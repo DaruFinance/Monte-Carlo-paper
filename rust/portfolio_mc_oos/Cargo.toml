@@ -1,0 +1,20 @@
+[package]
+name = "portfolio_mc_oos"
+version = "0.1.0"
+edition = "2021"
+authors = ["Daniel Gatto"]
+description = "Portfolio MC ranks with same-window and next-window OOS outcomes."
+license = "MIT"
+
+[dependencies]
+rayon = "1.10"
+rand = { version = "0.8", features = ["small_rng"] }
+walkdir = "2"
+
+[[bin]]
+name = "portfolio_mc_oos"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = 3
+lto = true

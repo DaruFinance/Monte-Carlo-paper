@@ -2,7 +2,7 @@
 name = "synthetic_pipeline"
 version = "0.1.0"
 edition = "2021"
-authors = ["anonymous"]
+authors = ["Daniel Gatto"]
 description = "Three-tier synthetic MC validation pipeline (scenarios A/B/C for paper figures 5-8)"
 
 [dependencies]

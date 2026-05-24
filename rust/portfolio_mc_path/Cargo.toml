@@ -1,0 +1,20 @@
+[package]
+name = "portfolio_mc_path"
+version = "0.1.0"
+edition = "2021"
+authors = ["Daniel Gatto"]
+description = "Portfolio-level MC ranks under permutation, MDD-based."
+license = "MIT"
+
+[dependencies]
+rayon = "1.10"
+rand = { version = "0.8", features = ["small_rng"] }
+walkdir = "2"
+
+[[bin]]
+name = "portfolio_mc_path"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = 3
+lto = true

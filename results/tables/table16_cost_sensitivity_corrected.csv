@@ -1,0 +1,145 @@
+Asset,Cost Level,MC Filter,IS Pool (n),MC+IS Pool (n),IS OOS PF>1 %,MC+IS OOS PF>1 %,Lift (pp)
+BTC,"Baseline (1x fee, 1x slip)",MC-MDD p50,429409,225615,34.0,33.82,-0.18
+BTC,"Baseline (1x fee, 1x slip)",MC-Calmar p50,429409,226144,34.0,33.83,-0.18
+BTC,"Baseline (1x fee, 1x slip)",MC-Ulcer p50,429409,222969,34.0,33.88,-0.12
+BTC,"Baseline (1x fee, 1x slip)",MC-ROI* p50 (art.),429409,144193,34.0,32.69,-1.31
+BTC,Fee+100% (2x fee),MC-MDD p50,303249,159904,27.82,27.51,-0.32
+BTC,Fee+100% (2x fee),MC-Calmar p50,303249,160368,27.82,27.53,-0.29
+BTC,Fee+100% (2x fee),MC-Ulcer p50,303249,158441,27.82,27.63,-0.19
+BTC,Fee+100% (2x fee),MC-ROI* p50 (art.),303249,96175,27.82,26.09,-1.74
+BTC,Slip+200% (3x slip),MC-MDD p50,279619,147458,26.87,26.54,-0.34
+BTC,Slip+200% (3x slip),MC-Calmar p50,279619,147913,26.87,26.56,-0.31
+BTC,Slip+200% (3x slip),MC-Ulcer p50,279619,146317,26.87,26.69,-0.19
+BTC,Slip+200% (3x slip),MC-ROI* p50 (art.),279619,87841,26.87,25.36,-1.51
+BTC,Entry+Indicator drift,MC-MDD p50,424042,222142,33.65,33.52,-0.12
+BTC,Entry+Indicator drift,MC-Calmar p50,424042,220360,33.65,33.55,-0.1
+BTC,Entry+Indicator drift,MC-Ulcer p50,424042,218942,33.65,33.52,-0.13
+BTC,Entry+Indicator drift,MC-ROI* p50 (art.),424042,145684,33.65,32.49,-1.16
+DOGE,"Baseline (1x fee, 1x slip)",MC-MDD p50,373628,188357,38.49,38.64,0.15
+DOGE,"Baseline (1x fee, 1x slip)",MC-Calmar p50,373628,188737,38.49,38.66,0.16
+DOGE,"Baseline (1x fee, 1x slip)",MC-Ulcer p50,373628,187577,38.49,38.77,0.28
+DOGE,"Baseline (1x fee, 1x slip)",MC-ROI* p50 (art.),373628,126843,38.49,37.69,-0.8
+DOGE,Fee+100% (2x fee),MC-MDD p50,266714,135074,30.65,30.76,0.11
+DOGE,Fee+100% (2x fee),MC-Calmar p50,266714,135397,30.65,30.79,0.14
+DOGE,Fee+100% (2x fee),MC-Ulcer p50,266714,134832,30.65,30.85,0.2
+DOGE,Fee+100% (2x fee),MC-ROI* p50 (art.),266714,85729,30.65,29.43,-1.21
+DOGE,Slip+200% (3x slip),MC-MDD p50,247167,125198,29.66,29.81,0.16
+DOGE,Slip+200% (3x slip),MC-Calmar p50,247167,125521,29.66,29.85,0.19
+DOGE,Slip+200% (3x slip),MC-Ulcer p50,247167,125043,29.66,29.94,0.28
+DOGE,Slip+200% (3x slip),MC-ROI* p50 (art.),247167,78720,29.66,28.5,-1.16
+DOGE,Entry+Indicator drift,MC-MDD p50,361689,182796,38.81,38.96,0.15
+DOGE,Entry+Indicator drift,MC-Calmar p50,361689,182409,38.81,39.0,0.19
+DOGE,Entry+Indicator drift,MC-Ulcer p50,361689,182060,38.81,39.08,0.27
+DOGE,Entry+Indicator drift,MC-ROI* p50 (art.),361689,126097,38.81,37.84,-0.97
+BNB,"Baseline (1x fee, 1x slip)",MC-MDD p50,475457,239920,31.32,31.05,-0.28
+BNB,"Baseline (1x fee, 1x slip)",MC-Calmar p50,475457,240474,31.32,31.06,-0.26
+BNB,"Baseline (1x fee, 1x slip)",MC-Ulcer p50,475457,236587,31.32,31.12,-0.21
+BNB,"Baseline (1x fee, 1x slip)",MC-ROI* p50 (art.),475457,157713,31.32,29.99,-1.33
+BNB,Fee+100% (2x fee),MC-MDD p50,319244,160749,25.59,25.11,-0.47
+BNB,Fee+100% (2x fee),MC-Calmar p50,319244,161242,25.59,25.15,-0.44
+BNB,Fee+100% (2x fee),MC-Ulcer p50,319244,158987,25.59,25.21,-0.38
+BNB,Fee+100% (2x fee),MC-ROI* p50 (art.),319244,98470,25.59,24.11,-1.48
+BNB,Slip+200% (3x slip),MC-MDD p50,291407,146691,24.69,24.28,-0.41
+BNB,Slip+200% (3x slip),MC-Calmar p50,291407,147200,24.69,24.32,-0.37
+BNB,Slip+200% (3x slip),MC-Ulcer p50,291407,145266,24.69,24.33,-0.36
+BNB,Slip+200% (3x slip),MC-ROI* p50 (art.),291407,88648,24.69,23.31,-1.38
+BNB,Entry+Indicator drift,MC-MDD p50,490932,247870,31.22,31.08,-0.15
+BNB,Entry+Indicator drift,MC-Calmar p50,490932,246886,31.22,31.1,-0.12
+BNB,Entry+Indicator drift,MC-Ulcer p50,490932,244671,31.22,31.16,-0.07
+BNB,Entry+Indicator drift,MC-ROI* p50 (art.),490932,167026,31.22,29.88,-1.34
+SOL,"Baseline (1x fee, 1x slip)",MC-MDD p50,144261,73110,41.27,41.19,-0.08
+SOL,"Baseline (1x fee, 1x slip)",MC-Calmar p50,144261,73497,41.27,41.25,-0.02
+SOL,"Baseline (1x fee, 1x slip)",MC-Ulcer p50,144261,74470,41.27,41.15,-0.12
+SOL,"Baseline (1x fee, 1x slip)",MC-ROI* p50 (art.),144261,49383,41.27,39.94,-1.33
+SOL,Fee+100% (2x fee),MC-MDD p50,114027,57951,34.83,34.44,-0.39
+SOL,Fee+100% (2x fee),MC-Calmar p50,114027,58313,34.83,34.54,-0.29
+SOL,Fee+100% (2x fee),MC-Ulcer p50,114027,59012,34.83,34.47,-0.36
+SOL,Fee+100% (2x fee),MC-ROI* p50 (art.),114027,37437,34.83,33.07,-1.76
+SOL,Slip+200% (3x slip),MC-MDD p50,108844,55316,33.78,33.53,-0.25
+SOL,Slip+200% (3x slip),MC-Calmar p50,108844,55679,33.78,33.62,-0.16
+SOL,Slip+200% (3x slip),MC-Ulcer p50,108844,56385,33.78,33.47,-0.31
+SOL,Slip+200% (3x slip),MC-ROI* p50 (art.),108844,35433,33.78,32.28,-1.5
+SOL,Entry+Indicator drift,MC-MDD p50,139009,70450,40.8,41.02,0.21
+SOL,Entry+Indicator drift,MC-Calmar p50,139009,70704,40.8,40.82,0.01
+SOL,Entry+Indicator drift,MC-Ulcer p50,139009,71368,40.8,40.91,0.11
+SOL,Entry+Indicator drift,MC-ROI* p50 (art.),139009,48681,40.8,39.47,-1.34
+EURUSD,"Baseline (1x fee, 1x slip)",MC-MDD p50,76706,28042,21.39,17.27,-4.11
+EURUSD,"Baseline (1x fee, 1x slip)",MC-Calmar p50,76706,31559,21.39,18.65,-2.74
+EURUSD,"Baseline (1x fee, 1x slip)",MC-Ulcer p50,76706,34484,21.39,19.41,-1.98
+EURUSD,"Baseline (1x fee, 1x slip)",MC-ROI* p50 (art.),76706,23587,21.39,19.69,-1.7
+EURUSD,Fee+100% (2x fee),MC-MDD p50,76522,27951,21.4,17.29,-4.12
+EURUSD,Fee+100% (2x fee),MC-Calmar p50,76522,31468,21.4,18.66,-2.75
+EURUSD,Fee+100% (2x fee),MC-Ulcer p50,76522,34390,21.4,19.43,-1.98
+EURUSD,Fee+100% (2x fee),MC-ROI* p50 (art.),76522,23499,21.4,19.69,-1.71
+EURUSD,Slip+200% (3x slip),MC-MDD p50,76706,28042,21.39,17.27,-4.11
+EURUSD,Slip+200% (3x slip),MC-Calmar p50,76706,31559,21.39,18.65,-2.74
+EURUSD,Slip+200% (3x slip),MC-Ulcer p50,76706,34484,21.39,19.41,-1.98
+EURUSD,Slip+200% (3x slip),MC-ROI* p50 (art.),76706,23587,21.39,19.69,-1.7
+EURUSD,Entry+Indicator drift,MC-MDD p50,84116,35770,21.52,19.47,-2.04
+EURUSD,Entry+Indicator drift,MC-Calmar p50,84116,38634,21.52,20.17,-1.35
+EURUSD,Entry+Indicator drift,MC-Ulcer p50,84116,39668,21.52,20.32,-1.2
+EURUSD,Entry+Indicator drift,MC-ROI* p50 (art.),84116,24224,21.52,20.77,-0.74
+USDJPY,"Baseline (1x fee, 1x slip)",MC-MDD p50,67838,22797,20.92,17.15,-3.77
+USDJPY,"Baseline (1x fee, 1x slip)",MC-Calmar p50,67838,26546,20.92,18.5,-2.42
+USDJPY,"Baseline (1x fee, 1x slip)",MC-Ulcer p50,67838,29202,20.92,19.16,-1.76
+USDJPY,"Baseline (1x fee, 1x slip)",MC-ROI* p50 (art.),67838,20305,20.92,19.2,-1.72
+USDJPY,Fee+100% (2x fee),MC-MDD p50,67707,22736,20.93,17.17,-3.76
+USDJPY,Fee+100% (2x fee),MC-Calmar p50,67707,26485,20.93,18.52,-2.41
+USDJPY,Fee+100% (2x fee),MC-Ulcer p50,67707,29144,20.93,19.17,-1.76
+USDJPY,Fee+100% (2x fee),MC-ROI* p50 (art.),67707,20235,20.93,19.23,-1.71
+USDJPY,Slip+200% (3x slip),MC-MDD p50,67838,22797,20.92,17.15,-3.77
+USDJPY,Slip+200% (3x slip),MC-Calmar p50,67838,26546,20.92,18.5,-2.42
+USDJPY,Slip+200% (3x slip),MC-Ulcer p50,67838,29202,20.92,19.16,-1.76
+USDJPY,Slip+200% (3x slip),MC-ROI* p50 (art.),67838,20305,20.92,19.2,-1.72
+USDJPY,Entry+Indicator drift,MC-MDD p50,74343,30534,21.93,19.84,-2.1
+USDJPY,Entry+Indicator drift,MC-Calmar p50,74343,33102,21.93,20.39,-1.55
+USDJPY,Entry+Indicator drift,MC-Ulcer p50,74343,33908,21.93,20.58,-1.36
+USDJPY,Entry+Indicator drift,MC-ROI* p50 (art.),74343,21155,21.93,21.11,-0.82
+EURGBP,"Baseline (1x fee, 1x slip)",MC-MDD p50,201101,79380,35.35,33.38,-1.97
+EURGBP,"Baseline (1x fee, 1x slip)",MC-Calmar p50,201101,85986,35.35,34.12,-1.23
+EURGBP,"Baseline (1x fee, 1x slip)",MC-Ulcer p50,201101,91720,35.35,34.18,-1.17
+EURGBP,"Baseline (1x fee, 1x slip)",MC-ROI* p50 (art.),201101,60634,35.35,34.66,-0.69
+EURGBP,Fee+100% (2x fee),MC-MDD p50,200477,79078,35.32,33.34,-1.97
+EURGBP,Fee+100% (2x fee),MC-Calmar p50,200477,85684,35.32,34.09,-1.23
+EURGBP,Fee+100% (2x fee),MC-Ulcer p50,200477,91410,35.32,34.16,-1.15
+EURGBP,Fee+100% (2x fee),MC-ROI* p50 (art.),200477,60347,35.32,34.63,-0.69
+EURGBP,Slip+200% (3x slip),MC-MDD p50,201101,79380,35.35,33.38,-1.97
+EURGBP,Slip+200% (3x slip),MC-Calmar p50,201101,85986,35.35,34.12,-1.23
+EURGBP,Slip+200% (3x slip),MC-Ulcer p50,201101,91720,35.35,34.18,-1.17
+EURGBP,Slip+200% (3x slip),MC-ROI* p50 (art.),201101,60634,35.35,34.66,-0.69
+EURGBP,Entry+Indicator drift,MC-MDD p50,219279,93229,36.14,34.7,-1.44
+EURGBP,Entry+Indicator drift,MC-Calmar p50,219279,101051,36.14,35.66,-0.48
+EURGBP,Entry+Indicator drift,MC-Ulcer p50,219279,102395,36.14,35.2,-0.94
+EURGBP,Entry+Indicator drift,MC-ROI* p50 (art.),219279,65302,36.14,35.74,-0.4
+XAUUSD,"Baseline (1x fee, 1x slip)",MC-MDD p50,657969,348490,55.7,55.73,0.02
+XAUUSD,"Baseline (1x fee, 1x slip)",MC-Calmar p50,657969,348916,55.7,55.72,0.02
+XAUUSD,"Baseline (1x fee, 1x slip)",MC-Ulcer p50,657969,347345,55.7,55.67,-0.03
+XAUUSD,"Baseline (1x fee, 1x slip)",MC-ROI* p50 (art.),657969,179089,55.7,55.13,-0.58
+XAUUSD,Fee+100% (2x fee),MC-MDD p50,628502,332601,52.4,52.36,-0.05
+XAUUSD,Fee+100% (2x fee),MC-Calmar p50,628502,333025,52.4,52.35,-0.05
+XAUUSD,Fee+100% (2x fee),MC-Ulcer p50,628502,331816,52.4,52.3,-0.11
+XAUUSD,Fee+100% (2x fee),MC-ROI* p50 (art.),628502,165986,52.4,51.87,-0.53
+XAUUSD,Slip+200% (3x slip),MC-MDD p50,657969,348490,55.7,55.73,0.02
+XAUUSD,Slip+200% (3x slip),MC-Calmar p50,657969,348916,55.7,55.72,0.02
+XAUUSD,Slip+200% (3x slip),MC-Ulcer p50,657969,347345,55.7,55.67,-0.03
+XAUUSD,Slip+200% (3x slip),MC-ROI* p50 (art.),657969,179089,55.7,55.13,-0.58
+XAUUSD,Entry+Indicator drift,MC-MDD p50,655721,346514,55.22,55.31,0.08
+XAUUSD,Entry+Indicator drift,MC-Calmar p50,655721,344018,55.22,55.3,0.08
+XAUUSD,Entry+Indicator drift,MC-Ulcer p50,655721,345574,55.22,55.24,0.01
+XAUUSD,Entry+Indicator drift,MC-ROI* p50 (art.),655721,179339,55.22,54.92,-0.3
+WTI,"Baseline (1x fee, 1x slip)",MC-MDD p50,584731,298388,43.76,43.98,0.22
+WTI,"Baseline (1x fee, 1x slip)",MC-Calmar p50,584731,299181,43.76,43.99,0.23
+WTI,"Baseline (1x fee, 1x slip)",MC-Ulcer p50,584731,298506,43.76,44.01,0.25
+WTI,"Baseline (1x fee, 1x slip)",MC-ROI* p50 (art.),584731,166445,43.76,43.58,-0.18
+WTI,Fee+100% (2x fee),MC-MDD p50,474114,241208,35.51,35.71,0.2
+WTI,Fee+100% (2x fee),MC-Calmar p50,474114,241978,35.51,35.73,0.22
+WTI,Fee+100% (2x fee),MC-Ulcer p50,474114,241533,35.51,35.75,0.24
+WTI,Fee+100% (2x fee),MC-ROI* p50 (art.),474114,121461,35.51,35.44,-0.07
+WTI,Slip+200% (3x slip),MC-MDD p50,584731,298388,43.76,43.98,0.22
+WTI,Slip+200% (3x slip),MC-Calmar p50,584731,299181,43.76,43.99,0.23
+WTI,Slip+200% (3x slip),MC-Ulcer p50,584731,298506,43.76,44.01,0.25
+WTI,Slip+200% (3x slip),MC-ROI* p50 (art.),584731,166445,43.76,43.58,-0.18
+WTI,Entry+Indicator drift,MC-MDD p50,574807,293695,43.21,43.3,0.09
+WTI,Entry+Indicator drift,MC-Calmar p50,574807,291871,43.21,43.39,0.18
+WTI,Entry+Indicator drift,MC-Ulcer p50,574807,293682,43.21,43.31,0.1
+WTI,Entry+Indicator drift,MC-ROI* p50 (art.),574807,164443,43.21,43.06,-0.15

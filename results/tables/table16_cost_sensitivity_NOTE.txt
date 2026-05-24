@@ -1,0 +1,10 @@
+table16_cost_sensitivity: NOT REBUILT.
+
+The original Table 16 used the {ent, fee, sli, entind}_is_pf perturbation
+columns produced by re-running each strategy with elevated fee/slippage
+parameters. Those columns are NOT in the toolkit's window_pairs CSVs
+(they require the upstream backtester). To rebuild Table 16 in the
+corrected paper, regenerate <asset>_window_pairs.csv with the ent/fee/
+sli/entind perturbations included, then re-run 03_rebuild_filter_lift.py
+with the appropriate filter rows enabled (they exist in the code but
+are skipped when the perturbation columns are absent).

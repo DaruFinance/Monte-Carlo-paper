@@ -1,0 +1,37 @@
+Asset,Asset description,Metric,Kind,N,Expected (%),Mean Rank (%),Median (%),% Below 50,Std Dev
+BTC,"BTC/USDT 30m, 27W",MDD,path-dependent,758956,50.0,51.3,51.9,48.0,28.9
+BTC,"BTC/USDT 30m, 27W",Calmar,path-dependent,758956,50.0,50.5,50.9,49.1,29.0
+BTC,"BTC/USDT 30m, 27W",Ulcer,path-dependent,758956,50.0,50.8,51.2,48.8,28.9
+BTC,"BTC/USDT 30m, 27W",ROI (artefactual),perm-invariant (FP only),758956,50.0,39.7,35.1,64.0,29.0
+DOGE,"DOGE/USDT 30m, 21W",MDD,path-dependent,637604,50.0,50.0,50.1,49.8,28.9
+DOGE,"DOGE/USDT 30m, 21W",Calmar,path-dependent,637604,50.0,50.1,50.3,49.7,29.0
+DOGE,"DOGE/USDT 30m, 21W",Ulcer,path-dependent,637604,50.0,49.9,49.9,50.1,28.9
+DOGE,"DOGE/USDT 30m, 21W",ROI (artefactual),perm-invariant (FP only),637604,50.0,39.7,35.3,63.9,29.0
+BNB,"BNB/USDT 15m, 30W",MDD,path-dependent,935576,50.0,50.3,50.5,49.5,28.9
+BNB,"BNB/USDT 15m, 30W",Calmar,path-dependent,935576,50.0,49.9,49.9,50.0,29.0
+BNB,"BNB/USDT 15m, 30W",Ulcer,path-dependent,935576,50.0,49.9,49.9,50.0,28.9
+BNB,"BNB/USDT 15m, 30W",ROI (artefactual),perm-invariant (FP only),935576,50.0,39.6,35.0,64.1,29.0
+SOL,"SOL/USDT 1h, 7W",MDD,path-dependent,216184,50.0,50.3,50.3,49.7,29.0
+SOL,"SOL/USDT 1h, 7W",Calmar,path-dependent,216184,50.0,50.5,50.7,49.3,29.1
+SOL,"SOL/USDT 1h, 7W",Ulcer,path-dependent,216184,50.0,50.6,50.9,49.1,29.0
+SOL,"SOL/USDT 1h, 7W",ROI (artefactual),perm-invariant (FP only),216184,50.0,39.6,35.2,64.0,29.1
+EUR/USD,"EUR/USD 1h, 15W",MDD,path-dependent,819822,50.0,47.3,46.6,53.2,29.7
+EUR/USD,"EUR/USD 1h, 15W",Calmar,path-dependent,819822,50.0,50.6,51.0,49.0,29.6
+EUR/USD,"EUR/USD 1h, 15W",Ulcer,path-dependent,819822,50.0,48.8,48.6,51.3,29.9
+EUR/USD,"EUR/USD 1h, 15W",ROI (artefactual),perm-invariant (FP only),819822,50.0,28.3,18.7,76.8,28.1
+USD/JPY,"USD/JPY 1h, 15W",MDD,path-dependent,810273,50.0,47.6,47.1,52.8,29.8
+USD/JPY,"USD/JPY 1h, 15W",Calmar,path-dependent,810273,50.0,50.1,50.3,49.6,29.6
+USD/JPY,"USD/JPY 1h, 15W",Ulcer,path-dependent,810273,50.0,48.0,47.3,52.5,29.9
+USD/JPY,"USD/JPY 1h, 15W",ROI (artefactual),perm-invariant (FP only),810273,50.0,27.5,17.5,77.6,27.9
+EUR/GBP,"EUR/GBP 1h, 15W",MDD,path-dependent,818896,50.0,45.9,44.7,55.0,29.8
+EUR/GBP,"EUR/GBP 1h, 15W",Calmar,path-dependent,818896,50.0,50.2,50.5,49.5,29.8
+EUR/GBP,"EUR/GBP 1h, 15W",Ulcer,path-dependent,818896,50.0,47.6,47.0,52.9,29.7
+EUR/GBP,"EUR/GBP 1h, 15W",ROI (artefactual),perm-invariant (FP only),818896,50.0,31.4,23.0,73.4,28.7
+XAU/USD,"XAU/USD 1h, 15W",MDD,path-dependent,817395,50.0,51.9,52.7,47.2,28.9
+XAU/USD,"XAU/USD 1h, 15W",Calmar,path-dependent,817395,50.0,51.4,52.0,48.0,28.9
+XAU/USD,"XAU/USD 1h, 15W",Ulcer,path-dependent,817395,50.0,51.8,52.5,47.4,29.0
+XAU/USD,"XAU/USD 1h, 15W",ROI (artefactual),perm-invariant (FP only),817395,50.0,33.2,25.6,71.7,28.7
+WTI,"WTI 1h, 15W",MDD,path-dependent,814419,50.0,50.8,51.0,48.9,29.0
+WTI,"WTI 1h, 15W",Calmar,path-dependent,814419,50.0,50.3,50.4,49.6,29.0
+WTI,"WTI 1h, 15W",Ulcer,path-dependent,814419,50.0,50.7,51.0,48.9,29.0
+WTI,"WTI 1h, 15W",ROI (artefactual),perm-invariant (FP only),814419,50.0,34.3,27.3,70.4,28.8

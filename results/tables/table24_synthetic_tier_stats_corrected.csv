@@ -1,0 +1,13 @@
+Tier,Metric,n,Mean lift (pp),t,p-value,Interpretation
+1: Pure Null,MC-ROI* (artefactual),8,-6.46,-4.84,0.0019,Lift signif. negative
+1: Pure Null,MC-MDD,8,-5.26,-3.1,0.0174,Lift signif. negative
+1: Pure Null,MC-Calmar,8,-3.7,-5.42,0.0010,Lift signif. negative
+1: Pure Null,MC-Ulcer,8,-5.38,-4.53,0.0027,Lift signif. negative
+2: Known Edge,MC-ROI* (artefactual),8,-6.84,-5.64,0.0008,Lift signif. negative
+2: Known Edge,MC-MDD,8,-5.3,-2.99,0.0201,Lift signif. negative
+2: Known Edge,MC-Calmar,8,-3.57,-5.36,0.0011,Lift signif. negative
+2: Known Edge,MC-Ulcer,8,-5.24,-3.93,0.0057,Lift signif. negative
+3: Adversarial,MC-ROI* (artefactual),4,-6.26,-6.58,0.0071,Lift signif. negative
+3: Adversarial,MC-MDD,4,-7.63,-4.88,0.0165,Lift signif. negative
+3: Adversarial,MC-Calmar,4,-2.67,-3.65,0.0356,Lift signif. negative
+3: Adversarial,MC-Ulcer,4,-6.76,-6.09,0.0089,Lift signif. negative

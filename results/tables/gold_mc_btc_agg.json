@@ -1,0 +1,104 @@
+{
+  "asset": "btc",
+  "n_cells": 29453,
+  "n_strategies": 1158,
+  "baseline_oos_rate": 32.17,
+  "rank_dist": {
+    "PF": {
+      "mean": 85.7,
+      "below50": 7.7,
+      "above90": 61.4,
+      "std": 20.0
+    },
+    "ROI": {
+      "mean": 77.1,
+      "below50": 20.7,
+      "above90": 61.3,
+      "std": 33.9
+    },
+    "Sharpe": {
+      "mean": 86.0,
+      "below50": 7.5,
+      "above90": 62.2,
+      "std": 19.8
+    },
+    "MDD": {
+      "mean": 36.7,
+      "below50": 63.7,
+      "above90": 10.0,
+      "std": 34.4
+    },
+    "Calmar": {
+      "mean": 85.0,
+      "below50": 8.8,
+      "above90": 62.1,
+      "std": 21.6
+    },
+    "Ulcer": {
+      "mean": 45.1,
+      "below50": 53.6,
+      "above90": 14.1,
+      "std": 35.0
+    }
+  },
+  "lifts": {
+    "gold_mdd": {
+      "pool": 10683,
+      "rate": 31.72,
+      "lift": -0.44
+    },
+    "gold_calmar": {
+      "pool": 26860,
+      "rate": 32.15,
+      "lift": -0.02
+    },
+    "gold_ulcer": {
+      "pool": 13666,
+      "rate": 31.9,
+      "lift": -0.26
+    },
+    "gold_roi": {
+      "pool": 23353,
+      "rate": 32.64,
+      "lift": 0.48
+    },
+    "ts_mdd": {
+      "pool": 15286,
+      "rate": 32.06,
+      "lift": -0.11
+    },
+    "ts_calmar": {
+      "pool": 14911,
+      "rate": 32.11,
+      "lift": -0.06
+    },
+    "ts_ulcer": {
+      "pool": 15074,
+      "rate": 32.17,
+      "lift": 0.0
+    },
+    "ts_roi": {
+      "pool": 10400,
+      "rate": 31.18,
+      "lift": -0.98
+    }
+  },
+  "corrs": {
+    "MDD": {
+      "pearson": 0.3792300505591877,
+      "spearman": 0.3867903407529084
+    },
+    "Calmar": {
+      "pearson": 0.22158922955502558,
+      "spearman": 0.19621102092981568
+    },
+    "Ulcer": {
+      "pearson": 0.3813892297620426,
+      "spearman": 0.3874290690973751
+    },
+    "ROI*": {
+      "pearson": -0.022041315059801656,
+      "spearman": -0.06249297297225074
+    }
+  }
+}

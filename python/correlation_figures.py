@@ -1,5 +1,5 @@
 """
-Strategy correlation figures: per-asset pairwise correlation heatmaps.
+Per-asset strategy correlation figures (supporting material).
 
 For each of the 9 instruments this script builds three figures from the
 OOS Profit Factor profile of every strategy across WFO windows:
@@ -11,15 +11,11 @@ OOS Profit Factor profile of every strategy across WFO windows:
 
 Plus a 3x3 panel summary figure across all 9 assets.
 
-Outputs feed:
-  - Figure 1 (fig_strategy_correlations.pdf)  -- per-asset heatmaps and
-    within-family vs cross-family correlation distributions are the
-    source artefacts behind the cross-instrument summary panel produced
-    by `strategy_correlations.py`.
-
-This is the figure-generating counterpart to `strategy_correlations.py`
-(which produces the summary statistics CSV for Table 3). Both scripts
-consume the same raw window_pairs CSVs.
+These per-asset heatmaps and within/cross-family distributions are SUPPORTING
+material only -- the cross-instrument summary figure that once anchored the
+paper's main body has been retired from the \\includegraphics set. The CSV
+artefact behind tab:family_corr is produced by `strategy_correlations.py`
+(a thin wrapper over the rust/corr_rs output).
 
 Inputs (relative to project root):
   - results/raw_data/<asset>_window_pairs.csv  (all 9 assets)

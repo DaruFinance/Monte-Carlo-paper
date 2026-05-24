@@ -57,13 +57,20 @@ read_csv_fast <- function(path) {
 }
 
 # Path helpers
-mc_perwindow_path  <- function(asset) file.path(mc_data_dir(), paste0(asset, "_mc_perwindow.csv"))
+# Corrected: mc_perwindow.csv → corrected_ranks.csv (paper Section sec:fp-pitfall);
+# the legacy name is kept as a fallback for backwards compatibility.
+mc_perwindow_path  <- function(asset) {
+  corrected <- file.path(mc_data_dir(), paste0(asset, "_corrected_ranks.csv"))
+  legacy    <- file.path(mc_data_dir(), paste0(asset, "_mc_perwindow.csv"))
+  if (file.exists(corrected)) return(corrected)
+  legacy
+}
 window_pairs_path  <- function(asset) file.path(mc_data_dir(), paste0(asset, "_window_pairs.csv"))
-portfolio_mc_path  <- function(asset) file.path(mc_data_dir(), paste0(asset, "_portfolio_mc.csv"))
-block_perm_path    <- function(asset) file.path(mc_root_dir(), paste0("block_perm_", asset, ".csv"))
+portfolio_mc_path  <- function(asset) file.path(mc_data_dir(), paste0(asset, "_portfolio_mc_path.csv"))
+block_perm_path    <- function(asset) file.path(mc_root_dir(), paste0("block_perm_path_", asset, ".csv"))
 
 # Ensure out dir exists (relative to current working directory, which is
-# expected to be Scripts_Clean/R/ when the scripts are run).
+# expected to be the repo's R/ directory when the scripts are run).
 ensure_out <- function() {
   out <- "out"
   if (!dir.exists(out)) dir.create(out, showWarnings = FALSE, recursive = TRUE)

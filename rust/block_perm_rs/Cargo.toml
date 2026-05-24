@@ -2,7 +2,7 @@
 name = "block_perm"
 version = "0.1.0"
 edition = "2021"
-authors = ["anonymous"]
+authors = ["Daniel Gatto"]
 description = "Block-permutation Monte Carlo ranks for per-window strategy PnL streams"
 
 [dependencies]

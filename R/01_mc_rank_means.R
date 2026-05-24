@@ -1,30 +1,33 @@
 #' 01_mc_rank_means.R
 #'
 #' Purpose:
-#'   Independently replicate the per-asset mean MC ROI percentile rank
-#'   statistics and test each against a 50% null (the null hypothesis
-#'   under exchangeability / Monte-Carlo symmetry).
+#'   Independently replicate the per-asset mean MC percentile rank statistics
+#'   on the path-dependent MDD metric (corrected Table 4) and test each
+#'   against a 50% null (the null hypothesis under exchangeability /
+#'   Monte-Carlo symmetry).
 #'
 #' Cross-validates (Python/Rust source):
-#'   - full_analysis.py (mean-rank summary)
-#'   - block_perm_rs/src/main.rs (produces the underlying roi_pct_rank)
+#'   - full_analysis.py (mean-rank summary for corrected Table 4)
+#'   - rust/mc_path_ranks (produces the underlying mdd_rank column)
 #'
 #' Paper artifact reproduced:
-#'   - Table 4 (per-asset mean MC ROI percentile rank)
-#'   - Inline stats in Section 5 (BTC 40.8%, EUR/USD 31.4%, DOGE 40.9%, etc.)
-#'   - "62.6%-70.4% of observations below the 50th percentile" inline claim
+#'   - Corrected Table 4 (per-asset mean MC-MDD/Calmar/Ulcer percentile rank;
+#'     ROI is permutation-invariant up to floating-point summation order
+#'     and is excluded from the headline test).
+#'   - Corrected mean-rank stats per asset under the exchangeability null.
 #'
 #' Method:
-#'   For each asset, read raw_data/<asset>_mc_perwindow.csv.
-#'   Column roi_pct_rank is a 0-100 percentile rank produced by the Rust
-#'   MC permutation test (1000 permutations per strategy-window).
+#'   For each asset, read raw_data/<asset>_corrected_ranks.csv.
+#'   Column mdd_rank is a 0-100 percentile rank produced by the Rust
+#'   mc_path_ranks crate (1000 permutations per strategy-window).
 #'   Under the exchangeability null each rank is Uniform[0,100] so E[rank]=50.
 #'   We compute mean, median, SD, share <50, and a one-sample t-test vs 50.
 #'
 #' Input:
-#'   $MC_PAPER_DATA/<asset>_mc_perwindow.csv (9 assets)
-#'   Columns: strategy, window, n_trades, actual_roi, actual_sharpe, actual_pf,
-#'            roi_pct_rank, sharpe_pct_rank, pf_pct_rank
+#'   $MC_PAPER_DATA/results/raw_data/<asset>_corrected_ranks.csv (9 assets)
+#'   Columns: strategy, window, n_trades, actual_roi, actual_mdd,
+#'            actual_calmar, actual_ulcer,
+#'            roi_rank_broken, mdd_rank, calmar_rank, ulcer_rank
 #'
 #' Output:
 #'   out/01_mc_rank_means.csv (per-asset summary)
@@ -35,6 +38,7 @@
 #' Usage:
 #'   Rscript 01_mc_rank_means.R
 
+# Corrected: switched from roi_rank to mdd_rank (paper Section sec:fp-pitfall)
 source("_helpers.R")
 set.seed(42)
 
@@ -45,9 +49,9 @@ for (asset in ALL_ASSETS) {
   path <- mc_perwindow_path(asset)
   dt <- read_csv_fast(path)
   if (is.null(dt)) next
-  if (!"roi_pct_rank" %in% names(dt)) next
+  if (!"mdd_rank" %in% names(dt)) next
 
-  r <- dt$roi_pct_rank
+  r <- dt$mdd_rank
   r <- r[is.finite(r)]
   n <- length(r)
   if (n == 0) next

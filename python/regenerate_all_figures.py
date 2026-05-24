@@ -1,1398 +1,1007 @@
-#!/usr/bin/env python3
 """
-Regenerate the 10 figures that appear in the paper (figures_new/*.pdf).
+Master figure-generation driver for the MC paper revision.
 
-Figures produced:
-  Fig 2.  window_level_mc_vs_oos.pdf          — forex/commodity per-window
-  Fig 3.  fig_bootstrap_lift_distributions.pdf — MC-lift bootstrap (crypto)
-  Fig 4.  fig_regime_robustness.pdf           — per-window MC ROI rank (crypto)
-  Fig 5.  fig_synthetic_mc_ranks.pdf          — synthetic scenarios A/B/C panel 1
-  Fig 6.  fig_synthetic_mc_analysis.pdf       — synthetic scenarios A/B/C panel 2
-  Fig 7.  fig_synthetic_pipeline_v4.pdf       — full-pipeline synthetic overview
-  Fig 8.  fig_synthetic_pipeline_detail.pdf   — pipeline tier details
-  Fig 9.  mc_pct_rank_distributions.pdf       — forex/commodity MC rank dists
-  Fig 10. mc_roi_vs_next_oos_binned.pdf       — forex/commodity MC vs next OOS
+Produces every figure cited by the paper from the corrected Rust outputs and
+the upstream window_pairs CSVs. Each banner below corresponds to one figure
+or one figure family (crypto + forex panels).
 
-Figure 1 (fig_strategy_correlations.pdf) is produced by
-strategy_correlations.py.
-
-Inputs (relative to ROOT = parents[1], or $MC_PAPER_DATA):
-  - results/raw_data/<asset>_window_pairs.csv        (9 assets)
-  - results/raw_data/<asset>_mc_perwindow.csv        (9 assets)
-  - results/tables/synthetic_v4_summaries.csv
-  - results/tables/synthetic_v4_null_filters.csv
-  - results/tables/synthetic_v4_edge_filters.csv
-  - results/tables/synthetic_v4_adversarial_filters.csv
-  - results/tables/synthetic_v4_signal_sweep.csv (optional)
+Inputs (relative to project root, override with MC_PAPER_DATA env var):
+  - results/raw_data/<asset>_corrected_ranks.csv
+  - results/raw_data/<asset>_window_pairs.csv
+  - results/raw_data/<asset>_block_perm_path.csv     (block-perm figures)
+  - results/raw_data/<asset>_portfolio_mc_path.csv   (portfolio figures)
 
 Outputs:
-  - results/figures/*.pdf   (9 files)
-
-Determinism: all synthetic simulations seeded (np.random.seed(42)).
+  - results/figures/fig3_bootstrap_lift_corrected{,_forex}.pdf
+  - results/figures/fig4_regime_robustness_corrected{,_forex}.pdf
+  - results/figures/fig5_synthetic_mc_ranks_corrected.pdf
+  - results/figures/fig6_synthetic_edge_strat_corrected.pdf
+  - results/figures/fig7_synthetic_tier_lift_corrected.pdf
+  - results/figures/fig8_synthetic_signal_sweep_corrected.pdf
+  - results/figures/fig_mc_rank_distributions_corrected{,_forex}.pdf
+  - results/figures/fig_portfolio_mc_rightshift.pdf
+  - results/figures/fig_gold_mc.pdf
+  - results/figures/fig_portfolio_oos_decile.pdf
+  - results/figures/fig_mc_by_family_heatmap.pdf
+  - results/figures/fig_crossasset_forest.pdf
+  - results/figures/fig_cost_sensitivity.pdf
+  - results/figures/fig_synthetic_groundtruth_ranks.pdf
 """
-import os
-import re
-import warnings
-from pathlib import Path
+import os  # noqa: F401
 
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
+# ======================================================================
+# === Section: Fig 3/4/9/10 + corrected rank distributions (crypto+forex) ===
+# ======================================================================
+
+"""
+Rebuild paper figures whose construction depends on the FP-buggy MC rank.
+
+Affected figures (crypto only — forex/commodity excluded per scope):
+  - Fig 3: fig_bootstrap_lift_distributions.pdf  (panels A,B: window-level + bootstrap lift)
+  - Fig 4: fig_regime_robustness.pdf             (per-window MC ROI rank vs OOS — crypto)
+  - Fig 9: mc_pct_rank_distributions.pdf         (MC rank distributions — was forex/commodity)
+  - Fig 10: mc_roi_vs_next_oos_binned.pdf        (was forex/commodity)
+  - Plus a NEW figure: fig_mc_rank_distributions_corrected.pdf
+    showing MDD/Calmar/Ulcer + ROI* (artefactual) distributions side-by-side.
+
+Outputs land in results/figures/. Caption text suggested in the rewrite
+guide.
+
+Requires: results/raw_data/<asset>_corrected_ranks.csv  (from rust/mc_path_ranks)
+          results/raw_data/<asset>_window_pairs.csv     (from upstream backtester)
+"""
+from __future__ import annotations
+import os
+from pathlib import Path
 import numpy as np
 import pandas as pd
-import seaborn as sns
-from scipy.stats import gaussian_kde, pearsonr
-
-warnings.filterwarnings('ignore')
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+from scipy.stats import gaussian_kde
 
 ROOT = Path(os.environ.get("MC_PAPER_DATA", Path(__file__).resolve().parents[1]))
-RAW = ROOT / "results" / "raw_data"
-TBL = ROOT / "results" / "tables"
-OUT = ROOT / "results" / "figures"
-OUT.mkdir(parents=True, exist_ok=True)
+DATA = ROOT / "results" / "raw_data"
+FIGS = ROOT / "results" / "figures"
+FIGS.mkdir(parents=True, exist_ok=True)
 
-sns.set_style('whitegrid')
-plt.rcParams.update({
-    'font.size': 11,
-    'axes.titlesize': 13,
-    'axes.labelsize': 11,
-    'xtick.labelsize': 10,
-    'ytick.labelsize': 10,
-    'legend.fontsize': 10,
-    'font.family': 'serif',
-    'mathtext.fontset': 'cm',
-})
+ASSETS = [("BTC", "btc"), ("DOGE", "doge"), ("BNB", "bnb"), ("SOL", "sol")]
+FOREX_ASSETS = [("EUR/USD", "eurusd"), ("USD/JPY", "usdjpy"), ("EUR/GBP", "eurgbp"),
+                ("XAU/USD", "xauusd"), ("WTI", "wti")]
 
-C_NAVY   = '#1d3557'
-C_RED    = '#c1292e'
-C_GRAY   = '#6c757d'
-C_GREEN  = '#27ae60'
-C_PURPLE = '#7b2d8e'
-C_ORANGE = '#e07a2f'
-C_TEAL   = '#2a9d8f'
+C_RED = "#C0392B"; C_NAVY = "#1F3864"; C_TEAL = "#2E8B57"
+C_PURPLE = "#7E57C2"; C_GRAY = "#777"
 
-CRYPTO_ASSETS = ['BTC', 'DOGE', 'BNB', 'SOL']
-ASSET_COLORS = {'BTC': '#e6853e', 'DOGE': '#2a9d8f',
-                'BNB': '#5e60ce', 'SOL': '#2c5f8a'}
-
-FOREX_ASSETS = ['EURUSD', 'USDJPY', 'EURGBP', 'XAUUSD', 'WTI']
-FOREX_LABELS = {
-    'EURUSD': 'EUR/USD 1h 15W',
-    'USDJPY': 'USD/JPY 1h 15W',
-    'EURGBP': 'EUR/GBP 1h 15W',
-    'XAUUSD': 'XAU/USD 1h 15W',
-    'WTI':    'WTI 1h 15W',
+# Filters defined on CORRECTED metrics
+FILTERS = {
+    'MC-MDD p50':    ('mdd_rank', 50),
+    'MC-MDD p75':    ('mdd_rank', 75),
+    'MC-Calmar p50': ('calmar_rank', 50),
+    'MC-Calmar p75': ('calmar_rank', 75),
+    'MC-Ulcer p50':  ('ulcer_rank', 50),
 }
 
 
-def savefig(fig, name):
-    """Save figure as 300-dpi PDF to the output directory and close it."""
-    path = OUT / name
-    fig.savefig(path, dpi=300, bbox_inches='tight', facecolor='white')
-    plt.close(fig)
-    print(f'  Saved: {path}')
-
-
-# Forex/commodity MC CSVs use strategy names that may contain commas. Some
-# pipeline versions emit them bare; newer versions wrap them in double quotes
-# (standard CSV escaping). The window-regex split handles both — we strip any
-# surrounding quote characters so the merge with window-pairs (which pandas
-# already unquotes) succeeds on the strategy key.
-def read_mc_perwindow(filepath):
-    """Parse a per-window MC CSV whose strategy names may contain commas."""
-    rows = []
-    with open(filepath) as f:
-        _ = f.readline()
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            m = re.search(r',W(\d+),', line)
-            if not m:
-                continue
-            strategy = line[:m.start()].strip('"')
-            parts = line[m.start() + 1:].split(',')
-            if len(parts) != 8:
-                continue
-            rows.append({
-                'strategy': strategy,
-                'window': parts[0],
-                'n_trades': int(parts[1]),
-                'actual_roi': float(parts[2]),
-                'actual_sharpe': float(parts[3]),
-                'actual_pf': float(parts[4]),
-                'roi_pct_rank': float(parts[5]),
-                'sharpe_pct_rank': float(parts[6]),
-                'pf_pct_rank': float(parts[7]),
-            })
-    return pd.DataFrame(rows)
-
-
-def load_forex_data():
-    """Load and merge MC per-window and window-pair CSVs for all forex assets."""
-    merged = {}
-    for a in FOREX_ASSETS:
-        mc_path = RAW / f'{a.lower()}_mc_perwindow.csv'
-        wp_path = RAW / f'{a.lower()}_window_pairs.csv'
-        if not mc_path.exists() or not wp_path.exists():
-            print(f'  WARNING: missing forex data for {a}')
-            continue
-        mc_df = read_mc_perwindow(mc_path)
-        mc_df['window_i'] = mc_df['window'].str.replace('W', '').astype(int)
-        wp_df = pd.read_csv(wp_path)
-        merged[a] = pd.merge(
-            wp_df,
-            mc_df[['strategy', 'window_i', 'n_trades', 'actual_roi',
-                   'actual_sharpe', 'actual_pf',
-                   'roi_pct_rank', 'sharpe_pct_rank', 'pf_pct_rank']],
-            on=['strategy', 'window_i'], how='inner',
-        )
-    return merged
-
-
-def load_crypto_merged():
-    """Load and merge MC per-window and window-pair CSVs for all crypto assets."""
-    merged = {}
-    for a in CRYPTO_ASSETS:
-        wp_path = RAW / f'{a.lower()}_window_pairs.csv'
-        mc_path = RAW / f'{a.lower()}_mc_perwindow.csv'
-        if not wp_path.exists() or not mc_path.exists():
-            print(f'  WARNING: missing crypto data for {a}')
-            continue
-        wp = pd.read_csv(wp_path)
-        mc = pd.read_csv(mc_path)
-        if 'window' in mc.columns and mc['window'].dtype == object:
-            mc['window_i'] = mc['window'].str.replace('W', '').astype(int)
-        elif 'window_i' not in mc.columns:
-            mc['window_i'] = mc['window']
-        merged[a] = pd.merge(
-            wp,
-            mc[['strategy', 'window_i', 'roi_pct_rank',
-                'sharpe_pct_rank', 'pf_pct_rank']],
-            on=['strategy', 'window_i'], how='inner',
-        )
-    return merged
-
-
-# ---------------------------------------------------------------------------
-#  Figure 2: window_level_mc_vs_oos.pdf (forex/commodity)
-# ---------------------------------------------------------------------------
-def figure_2():
-    """Produce Fig 2 (window_level_mc_vs_oos.pdf): per-window IS/OOS rates for forex/commodity."""
-    print('\n=== Figure 2: Window-Level MC vs OOS (Forex/Commodity) ===')
-    merged = load_forex_data()
-    if not merged:
-        print('  No forex data, skipping.')
-        return
-
-    fig, axes = plt.subplots(3, 2, figsize=(14, 15))
-    axes_flat = axes.flatten()
-    for idx, a in enumerate(FOREX_ASSETS):
-        if a not in merged:
-            continue
-        ax = axes_flat[idx]
-        m = merged[a]
-        windows = sorted(m['window_i'].unique())
-        bl_pass, mc_ranks, oos_rates = [], [], []
-        for w in windows:
-            wdf = m[m['window_i'] == w]
-            bl_pass.append((wdf['baseline_is_pf'] > 1.0).mean() * 100)
-            mc_ranks.append(wdf['roi_pct_rank'].mean())
-            has_next = wdf['next_baseline_oos_pf'].notna()
-            if has_next.sum() > 0:
-                oos_rates.append(
-                    (wdf.loc[has_next, 'next_baseline_oos_pf'] > 1.0).mean() * 100)
-            else:
-                oos_rates.append(np.nan)
-
-        ax2 = ax.twinx()
-        ax.plot(windows, bl_pass, 'o-', color='blue', alpha=0.7,
-                label='IS Pass Rate (%)', markersize=3)
-        ax.plot(windows, oos_rates, 's-', color='green', alpha=0.7,
-                label='Next OOS Prof (%)', markersize=3)
-        ax2.plot(windows, mc_ranks, '^-', color='red', alpha=0.7,
-                 label='Mean MC ROI Rank', markersize=3)
-        ax.set_xlabel('Window')
-        ax.set_ylabel('Rate (%)', color='blue')
-        ax2.set_ylabel('MC ROI Pct Rank', color='red')
-        ax.set_title(FOREX_LABELS[a])
-        l1, lb1 = ax.get_legend_handles_labels()
-        l2, lb2 = ax2.get_legend_handles_labels()
-        ax.legend(l1 + l2, lb1 + lb2, fontsize=6)
-        ax.grid(alpha=0.2)
-
-    axes_flat[-1].set_visible(False)
-    plt.suptitle(
-        'IS Pass Rate, MC Rank, and Next OOS Profitability by Window '
-        '(Forex/Commodity)', fontsize=13)
-    plt.tight_layout()
-    savefig(fig, 'window_level_mc_vs_oos.pdf')
-
-
-# ---------------------------------------------------------------------------
-#  Figure 3: bootstrap lift distributions (crypto, MC-only)
-# ---------------------------------------------------------------------------
-def figure_3():
-    """Produce Fig 3 (fig_bootstrap_lift_distributions.pdf): MC-lift bootstrap for crypto."""
-    print('\n=== Figure 3: Bootstrap Lift Distributions (MC Only) ===')
-    crypto_merged = load_crypto_merged()
-    if not crypto_merged:
-        print('  No crypto data, skipping.')
-        return
-
-    all_lifts = []
-    per_asset = {}
-    for a in CRYPTO_ASSETS:
-        if a not in crypto_merged:
-            continue
-        m = crypto_merged[a]
-        m_v = m[m['next_baseline_oos_pf'].notna()].copy()
-        asset_lifts = []
-        for w in sorted(m_v['window_i'].unique()):
-            wdf = m_v[m_v['window_i'] == w]
-            w_next = (wdf['next_baseline_oos_pf'] > 1.0).astype(float)
-            if len(w_next) < 10:
-                continue
-            w_base = w_next.mean() * 100
-            mc_pass = wdf['roi_pct_rank'] >= 50
-            if mc_pass.sum() > 5:
-                lift = w_next[mc_pass].mean() * 100 - w_base
-                asset_lifts.append(lift)
-                all_lifts.append(lift)
-        per_asset[a] = np.array(asset_lifts)
-
-    all_lifts = np.array(all_lifts)
-    if len(all_lifts) < 5:
-        print('  Not enough data for bootstrap, skipping.')
-        return
-
-    n_boot = 10000
-    np.random.seed(42)
-    boot_means = np.array([
-        np.random.choice(all_lifts, len(all_lifts), replace=True).mean()
-        for _ in range(n_boot)
-    ])
-    ci_lo, ci_hi = np.percentile(boot_means, [2.5, 97.5])
-
-    fig, axes = plt.subplots(1, 3, figsize=(16, 5))
-
-    # Panel A: window-level lift histogram
-    ax = axes[0]
-    ax.hist(all_lifts, bins=30, density=True, alpha=0.5, color=C_RED,
-            edgecolor='white', linewidth=0.5)
-    if all_lifts.std() > 0.1:
-        kde = gaussian_kde(all_lifts, bw_method=0.3)
-        x = np.linspace(all_lifts.min() - 2, all_lifts.max() + 2, 300)
-        ax.plot(x, kde(x), color=C_RED, linewidth=2)
-    ax.axvline(0, color=C_GRAY, ls='--', lw=1.5, alpha=0.7, label='Zero lift')
-    ax.axvline(all_lifts.mean(), color=C_RED, lw=2,
-               label=f'Mean = {all_lifts.mean():.2f} pp')
-    ax.set_xlabel('MC-ROI p50 Lift (pp)')
-    ax.set_ylabel('Density')
-    ax.set_title('(A) Window-Level MC Lift Distribution', fontweight='bold')
-    ax.legend(fontsize=9)
-    pct_neg = (all_lifts < 0).mean() * 100
-    ax.annotate(f'N = {len(all_lifts)} windows\n{pct_neg:.0f}% negative lift',
-                xy=(0.97, 0.95), xycoords='axes fraction',
-                fontsize=9, ha='right', va='top',
-                bbox=dict(boxstyle='round,pad=0.3', facecolor='white',
-                          edgecolor=C_GRAY, alpha=0.9))
-
-    # Panel B: bootstrap distribution
-    ax = axes[1]
-    ax.hist(boot_means, bins=50, density=True, alpha=0.5, color=C_RED,
-            edgecolor='white', linewidth=0.5)
-    if boot_means.std() > 0.001:
-        kde = gaussian_kde(boot_means, bw_method=0.3)
-        x = np.linspace(boot_means.min() - 0.5, boot_means.max() + 0.5, 300)
-        ax.plot(x, kde(x), color=C_RED, linewidth=2)
-    ax.axvline(0, color=C_GRAY, ls='--', lw=1.5, alpha=0.7)
-    ax.axvspan(ci_lo, ci_hi, alpha=0.15, color=C_RED,
-               label=f'95% CI: [{ci_lo:.2f}, {ci_hi:.2f}]')
-    ax.axvline(boot_means.mean(), color=C_RED, lw=2,
-               label=f'Mean = {boot_means.mean():.2f} pp')
-    ax.set_xlabel('Bootstrap Mean MC Lift (pp)')
-    ax.set_ylabel('Density')
-    ax.set_title('(B) Bootstrap Distribution (10K resamples)',
-                 fontweight='bold')
-    ax.legend(fontsize=8)
-
-    # Panel C: per-asset
-    ax = axes[2]
-    assets_plot = [a for a in CRYPTO_ASSETS
-                   if a in per_asset and len(per_asset[a]) > 2]
-    means, cis_lo, cis_hi = [], [], []
-    for a in assets_plot:
-        vals = per_asset[a]
-        boot_a = np.array([
-            np.random.choice(vals, len(vals), replace=True).mean()
-            for _ in range(n_boot)
-        ])
-        means.append(vals.mean())
-        cis_lo.append(np.percentile(boot_a, 2.5))
-        cis_hi.append(np.percentile(boot_a, 97.5))
-
-    y_pos = np.arange(len(assets_plot))
-    ax.barh(y_pos, means, color=C_RED, alpha=0.8,
-            edgecolor='white', height=0.6)
-    for i, (mv, lo, hi) in enumerate(zip(means, cis_lo, cis_hi)):
-        ax.plot([lo, hi], [i, i], color='black', lw=2, zorder=5)
-        ax.plot([lo, lo], [i - 0.1, i + 0.1], color='black', lw=2, zorder=5)
-        ax.plot([hi, hi], [i - 0.1, i + 0.1], color='black', lw=2, zorder=5)
-        ax.text(hi + 0.1, i, f'{mv:.2f} [{lo:.2f}, {hi:.2f}]',
-                va='center', fontsize=8, color=C_RED, fontweight='bold')
-
-    ax.axvline(0, color=C_GRAY, ls='--', lw=1.5, alpha=0.7)
-    ax.set_yticks(y_pos)
-    ax.set_yticklabels(assets_plot, fontsize=11, fontweight='bold')
-    ax.set_xlabel('MC-ROI p50 Lift (pp)')
-    ax.set_title('(C) Per-Asset MC Lift with 95% CI', fontweight='bold')
-
-    fig.suptitle('MC-ROI p50 Filter Lift: Window-Level Evidence',
-                 fontsize=14, fontweight='bold', y=1.02)
-    fig.tight_layout(rect=[0, 0, 1, 0.98])
-    savefig(fig, 'fig_bootstrap_lift_distributions.pdf')
-
-
-# ---------------------------------------------------------------------------
-#  Figure 4: regime robustness (crypto 2x2)
-# ---------------------------------------------------------------------------
-def figure_4():
-    """Produce Fig 4 (fig_regime_robustness.pdf): per-window MC ROI rank across crypto assets."""
-    print('\n=== Figure 4: Regime Robustness (Crypto) ===')
-    crypto_merged = load_crypto_merged()
-    if not crypto_merged:
-        print('  No crypto data, skipping.')
-        return
-
-    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
-    axes_flat = axes.flatten()
-
-    for idx, asset in enumerate(CRYPTO_ASSETS):
-        if asset not in crypto_merged:
-            axes_flat[idx].set_visible(False)
-            continue
-        ax = axes_flat[idx]
-        m = crypto_merged[asset]
-        windows = sorted(m['window_i'].unique())
-        mean_ranks, std_ranks = [], []
-        for w in windows:
-            wdf = m[m['window_i'] == w]
-            mean_ranks.append(wdf['roi_pct_rank'].mean())
-            std_ranks.append(wdf['roi_pct_rank'].std())
-        mean_ranks = np.array(mean_ranks)
-        std_ranks = np.array(std_ranks)
-
-        ax.plot(windows, mean_ranks, marker='o', color=ASSET_COLORS[asset],
-                linewidth=2, markersize=5, label='Mean MC ROI Rank', zorder=4)
-        ax.fill_between(windows,
-                        np.clip(mean_ranks - std_ranks, 0, 100),
-                        np.clip(mean_ranks + std_ranks, 0, 100),
-                        color=ASSET_COLORS[asset], alpha=0.15)
-        ax.axhline(50, color=C_GRAY, ls='--', lw=1.2, alpha=0.6,
-                   label='Random expectation (50%)')
-        ax.set_xlabel('WFO Window')
-        ax.set_ylabel('Mean MC ROI Rank')
-        ax.set_title(f'{asset}', fontsize=13, fontweight='bold')
-        ax.set_ylim(0, 80)
-        ax.legend(fontsize=8, loc='upper right')
-
-    fig.suptitle('MC ROI Rank Across WFO Windows: '
-                 'High Variance, No Consistent Signal',
-                 fontsize=14, fontweight='bold', y=1.01)
-    fig.tight_layout()
-    savefig(fig, 'fig_regime_robustness.pdf')
-
-
-# ---------------------------------------------------------------------------
-#  Synthetic helpers used by figures 5 and 6
-# ---------------------------------------------------------------------------
-def compute_path_metrics(rets):
-    """Compute ROI, max drawdown, Calmar, Sharpe, and profit factor from a returns matrix."""
-    roi = rets.sum(axis=1)
-    eq = np.cumsum(rets, axis=1)
-    rm = np.maximum.accumulate(eq, axis=1)
-    dd = rm - eq
-    mdd = dd.max(axis=1)
-    calmar = np.where(mdd > 1e-10, roi / mdd, 0.0)
-    mn = rets.mean(axis=1)
-    sd = rets.std(axis=1)
-    sharpe = np.where(sd > 1e-10, mn / sd * np.sqrt(rets.shape[1]), 0.0)
-    pos = np.where(rets > 0, rets, 0).sum(axis=1)
-    neg = np.abs(np.where(rets < 0, rets, 0).sum(axis=1))
-    pf = np.where(neg > 1e-10, pos / neg, 999.0)
-    return {'roi': roi, 'mdd': mdd, 'calmar': calmar, 'sharpe': sharpe, 'pf': pf}
-
-
-def mc_ranks_vectorized(is_rets, obs_metrics, n_mc=500, batch_size=500):
-    """Compute Monte Carlo percentile ranks for ROI, MDD, and Calmar in batches."""
-    n = len(is_rets)
-    rank_keys = ['roi', 'mdd', 'calmar']
-    counts = {k: np.zeros(n) for k in rank_keys}
-    for start in range(0, n, batch_size):
-        end = min(start + batch_size, n)
-        batch = is_rets[start:end]
-        bs = end - start
-        local = {k: np.zeros(bs) for k in rank_keys}
-        for _ in range(n_mc):
-            keys = np.random.random(batch.shape)
-            idx_arr = np.argsort(keys, axis=1)
-            shuffled = np.take_along_axis(batch, idx_arr, axis=1)
-            sm = compute_path_metrics(shuffled)
-            local['roi'] += (obs_metrics['roi'][start:end] > sm['roi'])
-            local['calmar'] += (obs_metrics['calmar'][start:end] > sm['calmar'])
-            local['mdd'] += (obs_metrics['mdd'][start:end] < sm['mdd'])
-        for k in rank_keys:
-            counts[k][start:end] = local[k] / n_mc * 100
-    return counts
-
-
-def rolling_mean_2d(arr, w):
-    cs = np.cumsum(arr, axis=1)
-    out = np.full_like(arr, np.nan)
-    out[:, w - 1:] = cs[:, w - 1:] / w
-    out[:, w:] = (cs[:, w:] - cs[:, :-w]) / w
-    return out
-
-
-def filter_stats_synth(df, mask, baseline_oos, label):
-    """Return OOS profitability and lift stats for a filtered subset of synthetic data."""
-    sub = df[mask]
-    if len(sub) == 0:
-        return None
-    oos = sub['oos_profitable'].mean() * 100
-    edge = sub['has_edge'].mean() * 100
-    return {'Filter': label, 'Pool': len(sub),
-            'OOS Prof%': round(oos, 2),
-            'Lift (pp)': round(oos - baseline_oos, 2),
-            '% Edge': round(edge, 1)}
-
-
-def run_synthetic_v3():
-    """Deterministically regenerate synthetic scenarios A/B/C used by
-    figures 5 and 6. Seed fixed at 42."""
-    np.random.seed(42)
-
-    # ---- Scenario A: realistic returns (Student-t, AR(1), GARCH) ----
-    N_STRAT_A, N_WIN_A, N_IS, N_OOS = 2000, 3, 200, 200
-    T_DF, AR_PHI = 5, 0.05
-    GARCH_A, GARCH_B, BASE_VOL_A = 0.10, 0.85, 0.02
-    REGIME_BAD_PROB = 0.30
-    PERTURB_A, PERTURB_B = 0.001, 0.0008
-    N_MC_A = 500
-
-    edge_alphas = np.clip(np.random.exponential(0.002, N_STRAT_A), 0, 0.01)
-    noedge_alphas = np.zeros(N_STRAT_A)
-    all_alphas = np.concatenate([edge_alphas, noedge_alphas])
-    all_edge = np.concatenate([np.ones(N_STRAT_A, dtype=bool),
-                               np.zeros(N_STRAT_A, dtype=bool)])
-    n_total_a = len(all_alphas)
-
-    sw_alpha = np.repeat(all_alphas, N_WIN_A)
-    sw_edge = np.repeat(all_edge, N_WIN_A)
-    sw_strat = np.repeat(np.arange(n_total_a), N_WIN_A)
-    sw_win = np.tile(np.arange(N_WIN_A), n_total_a)
-    n_sw = len(sw_alpha)
-
-    regime_bad = np.random.random(n_sw) < REGIME_BAD_PROB
-    effective_alpha = np.where(regime_bad, 0.0, sw_alpha)
-
-    def gen_returns_realistic(n, n_trades, alpha_vec):
-        rets = np.zeros((n, n_trades))
-        sigma2 = np.full(n, BASE_VOL_A ** 2)
-        prev_r = np.zeros(n)
-        for t in range(n_trades):
-            if t > 0:
-                omega = BASE_VOL_A ** 2 * (1 - GARCH_A - GARCH_B)
-                sigma2 = omega + GARCH_A * rets[:, t - 1] ** 2 + GARCH_B * sigma2
-                sigma2 = np.clip(sigma2, 1e-10, 0.01)
-            z = np.random.standard_t(T_DF, size=n)
-            z = z / np.sqrt(T_DF / (T_DF - 2))
-            rets[:, t] = AR_PHI * prev_r + alpha_vec + np.sqrt(sigma2) * z
-            prev_r = rets[:, t]
-        return rets
-
-    print('  Generating Scenario A...')
-    is_rets_a = gen_returns_realistic(n_sw, N_IS, effective_alpha)
-    oos_rets_a = gen_returns_realistic(n_sw, N_OOS, effective_alpha)
-    is_m = compute_path_metrics(is_rets_a)
-    oos_m = compute_path_metrics(oos_rets_a)
-    oos_profitable = oos_m['pf'] > 1.0
-
-    print('  Running MC for Scenario A...')
-    mc_ranks = mc_ranks_vectorized(is_rets_a, is_m, n_mc=N_MC_A, batch_size=500)
-
-    rob_pass = ((compute_path_metrics(is_rets_a - PERTURB_A)['pf'] > 1.0) &
-                (compute_path_metrics(is_rets_a - PERTURB_B)['pf'] > 1.0))
-
-    df_a = pd.DataFrame({
-        'strategy': sw_strat, 'window': sw_win,
-        'has_edge': sw_edge, 'true_alpha': sw_alpha, 'regime_bad': regime_bad,
-        'is_roi': is_m['roi'], 'is_pf': is_m['pf'], 'is_mdd': is_m['mdd'],
-        'is_calmar': is_m['calmar'], 'is_sharpe': is_m['sharpe'],
-        'oos_profitable': oos_profitable,
-        'mc_roi_rank': mc_ranks['roi'],
-        'mc_mdd_rank': mc_ranks['mdd'],
-        'mc_calmar_rank': mc_ranks['calmar'],
-        'rob_pass': rob_pass, 'is_pf_pass': is_m['pf'] > 1.0,
-    })
-    baseline_oos_a = df_a['oos_profitable'].mean() * 100
-
-    prev_results = []
-    for prev in [0.02, 0.10, 0.50]:
-        n_edge = int(N_STRAT_A * prev / (1 - prev)) if prev < 0.5 else N_STRAT_A
-        n_edge = min(n_edge, N_STRAT_A)
-        edge_idx = df_a[df_a['has_edge']].index[:n_edge * N_WIN_A]
-        noedge_idx = df_a[~df_a['has_edge']].index[:N_STRAT_A * N_WIN_A]
-        sub = df_a.loc[np.concatenate([edge_idx.values, noedge_idx.values])]
-        bl = sub['oos_profitable'].mean() * 100
-        row = {'Prevalence': f'{prev*100:.0f}%', 'N': len(sub),
-               'Baseline OOS%': round(bl, 1)}
-        for fname, mask_col, thresh, better in [
-            ('MC-ROI p50', 'mc_roi_rank', 50, 'ge'),
-            ('MC-MDD p50', 'mc_mdd_rank', 50, 'ge'),
-            ('MC-Calmar p50', 'mc_calmar_rank', 50, 'ge'),
-            ('Rob: Combined', 'rob_pass', True, 'eq'),
-        ]:
-            mm = sub[mask_col] >= thresh if better == 'ge' else sub[mask_col] == thresh
-            fsub = sub[mm]
-            row[f'{fname} Lift'] = round(fsub['oos_profitable'].mean() * 100 - bl, 1) if len(fsub) else None
-        prev_results.append(row)
-
-    a_filters = []
-    for fname, mask in [
-        ('No filter', pd.Series(True, index=df_a.index)),
-        ('IS PF>1', df_a['is_pf_pass']),
-        ('Rob: Combined', df_a['rob_pass']),
-        ('MC-ROI p50', df_a['mc_roi_rank'] >= 50),
-        ('MC-MDD p50', df_a['mc_mdd_rank'] >= 50),
-        ('MC-Calmar p50', df_a['mc_calmar_rank'] >= 50),
-    ]:
-        fs = filter_stats_synth(df_a, mask, baseline_oos_a, fname)
-        if fs:
-            a_filters.append(fs)
-    a_filter_df = pd.DataFrame(a_filters)
-
-    # ---- Scenario B: data-mined MA crossovers on momentum + RW assets ----
-    print('  Generating Scenario B...')
-    N_ASSETS_MOM, N_ASSETS_RW = 25, 25
-    N_BARS, N_IS_B, N_OOS_B = 2000, 1000, 1000
-    MOM_PHI, MOM_DRIFT, PRICE_VOL = 0.08, 0.0003, 0.015
-    TX_COST, N_MC_B = 0.0005, 300
-
-    FAST_PERIODS = [5, 10, 15, 20, 30]
-    SLOW_PERIODS = [50, 100, 200]
-    DIRECTIONS = ['long', 'longshort']
-
-    n_assets = N_ASSETS_MOM + N_ASSETS_RW
-    bar_returns = np.zeros((n_assets, N_BARS))
-    is_momentum = np.zeros(n_assets, dtype=bool)
-    is_momentum[:N_ASSETS_MOM] = True
-
-    for i in range(n_assets):
-        phi = MOM_PHI if is_momentum[i] else 0.0
-        drift = MOM_DRIFT if is_momentum[i] else 0.0
-        prev = 0.0
-        for t in range(N_BARS):
-            z = np.random.standard_t(5) / np.sqrt(5 / 3)
-            bar_returns[i, t] = drift + phi * prev + PRICE_VOL * z
-            prev = bar_returns[i, t]
-
-    prices = 100 * np.exp(np.cumsum(bar_returns, axis=1))
-    strat_rows_b, all_is, all_oos = [], [], []
-
-    for fast in FAST_PERIODS:
-        for slow in SLOW_PERIODS:
-            if fast >= slow:
-                continue
-            ma_fast = rolling_mean_2d(prices, fast)
-            ma_slow = rolling_mean_2d(prices, slow)
-            for direction in DIRECTIONS:
-                raw_signal = np.where(ma_fast > ma_slow, 1.0, -1.0)
-                if direction == 'long':
-                    raw_signal = np.where(raw_signal > 0, 1.0, 0.0)
-                valid = ~(np.isnan(ma_fast) | np.isnan(ma_slow))
-                raw_signal[~valid] = 0.0
-                trade_rets = raw_signal[:, :-1] * bar_returns[:, 1:]
-                sig_changes = np.abs(np.diff(raw_signal, axis=1))
-                cost_adj = sig_changes[:, :-1] * TX_COST
-                mlen = min(trade_rets.shape[1], cost_adj.shape[1])
-                trade_robust = trade_rets[:, :mlen] - cost_adj[:, :mlen]
-                is_tr = trade_rets[:, :N_IS_B]
-                oos_tr = trade_rets[:, N_IS_B:N_IS_B + N_OOS_B]
-                is_tr_rob = trade_robust[:, :N_IS_B]
-                for ai in range(n_assets):
-                    if np.abs(is_tr[ai]).sum() < 1e-10:
-                        continue
-                    all_is.append(is_tr[ai])
-                    all_oos.append(oos_tr[ai])
-                    strat_rows_b.append({
-                        'asset': ai,
-                        'has_momentum': is_momentum[ai],
-                        'fast': fast, 'slow': slow, 'direction': direction,
-                        'rob_pf': compute_path_metrics(
-                            is_tr_rob[ai:ai + 1])['pf'][0],
-                    })
-
-    is_rets_b = np.array(all_is)
-    oos_rets_b = np.array(all_oos)
-    is_m_b = compute_path_metrics(is_rets_b)
-    oos_m_b = compute_path_metrics(oos_rets_b)
-
-    print('  Running MC for Scenario B...')
-    mc_ranks_b = mc_ranks_vectorized(is_rets_b, is_m_b, n_mc=N_MC_B, batch_size=500)
-
-    for i, row in enumerate(strat_rows_b):
-        row['is_roi'] = is_m_b['roi'][i]
-        row['is_pf'] = is_m_b['pf'][i]
-        row['is_mdd'] = is_m_b['mdd'][i]
-        row['is_calmar'] = is_m_b['calmar'][i]
-        row['oos_pf'] = oos_m_b['pf'][i]
-        row['oos_profitable'] = oos_m_b['pf'][i] > 1.0
-        row['mc_roi_rank'] = mc_ranks_b['roi'][i]
-        row['mc_mdd_rank'] = mc_ranks_b['mdd'][i]
-        row['mc_calmar_rank'] = mc_ranks_b['calmar'][i]
-        row['rob_pass'] = row['rob_pf'] > 1.0
-        row['has_edge'] = row['has_momentum']
-
-    df_b = pd.DataFrame(strat_rows_b)
-    bl_b = df_b['oos_profitable'].mean() * 100
-
-    b_filters = []
-    for fname, mask in [
-        ('No filter', pd.Series(True, index=df_b.index)),
-        ('IS PF>1', df_b['is_pf'] > 1),
-        ('Rob: TX cost survives', df_b['rob_pass']),
-        ('MC-ROI p50', df_b['mc_roi_rank'] >= 50),
-        ('MC-MDD p50', df_b['mc_mdd_rank'] >= 50),
-        ('MC-Calmar p50', df_b['mc_calmar_rank'] >= 50),
-    ]:
-        fs = filter_stats_synth(df_b, mask, bl_b, fname)
-        if fs:
-            b_filters.append(fs)
-    b_filter_df = pd.DataFrame(b_filters)
-
-    # ---- Scenario C: factor-model portfolios ----
-    print('  Generating Scenario C...')
-    N_STRAT_C, N_TRADES_C = 500, 200
-    N_PORT, PORT_SIZE = 500, 10
-    FACTOR_VOL, IDIO_VOL, N_MC_C = 0.012, 0.015, 300
-
-    factor = np.random.normal(0, FACTOR_VOL, N_TRADES_C)
-    betas = np.random.uniform(0.5, 1.5, N_STRAT_C)
-    alphas_c = np.zeros(N_STRAT_C)
-    alphas_c[:N_STRAT_C // 2] = np.clip(
-        np.random.exponential(0.002, N_STRAT_C // 2), 0, 0.01)
-    has_edge_c = np.zeros(N_STRAT_C, dtype=bool)
-    has_edge_c[:N_STRAT_C // 2] = True
-
-    is_rets_c = (betas[:, None] * factor[None, :] +
-                 alphas_c[:, None] +
-                 np.random.normal(0, IDIO_VOL, (N_STRAT_C, N_TRADES_C)))
-    factor_oos = np.random.normal(0, FACTOR_VOL, N_TRADES_C)
-    oos_rets_c = (betas[:, None] * factor_oos[None, :] +
-                  alphas_c[:, None] +
-                  np.random.normal(0, IDIO_VOL, (N_STRAT_C, N_TRADES_C)))
-    is_m_c = compute_path_metrics(is_rets_c)
-
-    top24 = np.argsort(-is_m_c['pf'])[:24]
-    port_results = []
-    for p_id in range(N_PORT):
-        sel = np.random.choice(top24, PORT_SIZE, replace=False)
-        p_is_roi = is_rets_c[sel].mean(axis=0).sum()
-        p_oos_roi = oos_rets_c[sel].mean(axis=0).sum()
-        null_rois = np.zeros(N_MC_C)
-        for mc_i in range(N_MC_C):
-            shuffled = np.zeros(N_TRADES_C)
-            for s in sel:
-                perm = np.random.permutation(N_TRADES_C)
-                shuffled += is_rets_c[s, perm]
-            shuffled /= PORT_SIZE
-            null_rois[mc_i] = shuffled.sum()
-        port_results.append({
-            'portfolio_id': p_id,
-            'is_roi': p_is_roi, 'oos_roi': p_oos_roi,
-            'oos_profitable': p_oos_roi > 0,
-            'mc_rank': (p_is_roi > null_rois).mean() * 100,
-            'pct_edge': has_edge_c[sel].mean() * 100,
-            'mean_corr':
-                np.corrcoef(is_rets_c[sel])[
-                    np.triu_indices(PORT_SIZE, k=1)].mean(),
-        })
-    port_df = pd.DataFrame(port_results)
-
-    return {
-        'df_a': df_a, 'baseline_oos_a': baseline_oos_a,
-        'a_filter_df': a_filter_df, 'prev_results': prev_results,
-        'df_b': df_b, 'bl_b': bl_b, 'b_filter_df': b_filter_df,
-        'port_df': port_df,
-    }
-
-
-def figure_5(syn):
-    """Produce Fig 5 (fig_synthetic_mc_ranks.pdf): synthetic scenarios A/B/C rank distributions."""
-    print('\n=== Figure 5: Synthetic MC Ranks ===')
-    df_a = syn['df_a']
-    baseline_oos = syn['baseline_oos_a']
-    a_filter_df = syn['a_filter_df']
-    prev_results = syn['prev_results']
-
-    fig, axes = plt.subplots(2, 2, figsize=(14, 11))
-
-    ax = axes[0, 0]
-    for edge, color, label in [(True, C_TEAL, 'WITH edge'),
-                                (False, C_RED, 'WITHOUT edge')]:
-        vals = df_a[df_a['has_edge'] == edge]['mc_mdd_rank'].values
-        ax.hist(vals, bins=50, density=True, alpha=0.3, color=color,
-                edgecolor='white', linewidth=0.3)
-        if vals.std() > 0.5:
-            kde = gaussian_kde(vals, bw_method=0.1)
-            x = np.linspace(0, 100, 300)
-            ax.plot(x, kde(x), color=color, linewidth=2,
-                    label=f'{label} (mean={vals.mean():.1f}%)')
-    ax.axvline(50, color=C_GRAY, ls='--', lw=1.5, alpha=0.7)
-    ax.set_xlabel('MC Max-Drawdown Percentile Rank')
-    ax.set_ylabel('Density')
-    ax.set_title('Path-Dependent MC: Max Drawdown\n'
-                 '(heavy tails, AR(1), GARCH, regime shifts)',
-                 fontweight='bold', fontsize=10)
-    ax.legend(fontsize=8)
-    r_mdd, _ = pearsonr(df_a['mc_mdd_rank'], df_a['oos_profitable'].astype(float))
-    ax.annotate(f'r vs OOS = {r_mdd:.4f}\nR\u00b2 = {r_mdd**2*100:.3f}%',
-                xy=(0.03, 0.95), xycoords='axes fraction', fontsize=8,
-                ha='left', va='top',
-                bbox=dict(boxstyle='round,pad=0.3', facecolor='white',
-                          edgecolor=C_GRAY, alpha=0.9))
-
-    ax = axes[0, 1]
-    for edge, color, label in [(True, C_TEAL, 'WITH edge'),
-                                (False, C_RED, 'WITHOUT edge')]:
-        vals = df_a[df_a['has_edge'] == edge]['mc_calmar_rank'].values
-        ax.hist(vals, bins=50, density=True, alpha=0.3, color=color,
-                edgecolor='white', linewidth=0.3)
-        if vals.std() > 0.5:
-            kde = gaussian_kde(vals, bw_method=0.1)
-            x = np.linspace(0, 100, 300)
-            ax.plot(x, kde(x), color=color, linewidth=2,
-                    label=f'{label} (mean={vals.mean():.1f}%)')
-    ax.axvline(50, color=C_GRAY, ls='--', lw=1.5, alpha=0.7)
-    ax.set_xlabel('MC Calmar Percentile Rank')
-    ax.set_ylabel('Density')
-    ax.set_title('Path-Dependent MC: Calmar Ratio',
-                 fontweight='bold', fontsize=10)
-    ax.legend(fontsize=8)
-
-    # (c) Prevalence sweep
-    ax = axes[1, 0]
-    prevs = [2, 10, 50]
-    mdd_l = [r.get('MC-MDD p50 Lift', 0) or 0 for r in prev_results]
-    cal_l = [r.get('MC-Calmar p50 Lift', 0) or 0 for r in prev_results]
-    rob_l = [r.get('Rob: Combined Lift', 0) or 0 for r in prev_results]
-    x_pos = np.arange(len(prevs))
-    w = 0.25
-    ax.bar(x_pos - w, mdd_l, w, color=C_RED, alpha=0.8, label='MC-MDD p50')
-    ax.bar(x_pos, cal_l, w, color=C_ORANGE, alpha=0.8, label='MC-Calmar p50')
-    ax.bar(x_pos + w, rob_l, w, color=C_NAVY, alpha=0.8, label='Rob: Combined')
-    ax.axhline(0, color=C_GRAY, lw=1, alpha=0.5)
-    ax.set_xticks(x_pos)
-    ax.set_xticklabels([f'{p}%' for p in prevs])
-    ax.set_xlabel('True Edge Prevalence')
-    ax.set_ylabel('Lift vs Baseline (pp)')
-    ax.set_title('Filter Lift Across Edge Prevalences',
-                 fontweight='bold', fontsize=10)
-    ax.legend(fontsize=8, loc='upper left')
-
-    # (d) Filter bar chart
-    ax = axes[1, 1]
-    show = a_filter_df[a_filter_df['Filter'] != 'No filter'].copy()
-    show = show.sort_values('OOS Prof%', ascending=True).reset_index(drop=True)
-
-    def fcolor(f):
-        if 'MC' in f:
-            return C_RED
-        if 'Rob' in f:
-            return C_NAVY
-        return C_GRAY
-
-    colors = [fcolor(f) for f in show['Filter']]
-    ax.barh(range(len(show)), show['OOS Prof%'], color=colors,
-            edgecolor='white', height=0.65, alpha=0.9)
-    ax.axvline(baseline_oos, color=C_GRAY, ls='--', lw=1.5, alpha=0.6,
-               label=f'Baseline ({baseline_oos:.1f}%)')
-    ax.set_yticks(range(len(show)))
-    ax.set_yticklabels(
-        [f"{r['Filter']}  (n={r['Pool']/1e3:.0f}K)"
-         for _, r in show.iterrows()], fontsize=9)
-    for i, (_, r) in enumerate(show.iterrows()):
-        lift = r['Lift (pp)']
-        c = C_GREEN if lift > 0 else C_RED
-        ax.text(r['OOS Prof%'] + 0.15, i, f'{lift:+.1f} pp',
-                va='center', fontsize=8, color=c, fontweight='bold')
-    ax.set_xlabel('OOS Profitability (%)')
-    ax.set_title('Filter Effectiveness (50% prevalence)',
-                 fontweight='bold', fontsize=10)
-    ax.legend(fontsize=8)
-
-    fig.tight_layout()
-    savefig(fig, 'fig_synthetic_mc_ranks.pdf')
-
-
-def figure_6(syn):
-    """Produce Fig 6 (fig_synthetic_mc_analysis.pdf): data-mining scenario and portfolio MC ranks."""
-    print('\n=== Figure 6: Synthetic MC Analysis ===')
-    df_a = syn['df_a']
-    df_b = syn['df_b']
-    bl_b = syn['bl_b']
-    b_filter_df = syn['b_filter_df']
-    port_df = syn['port_df']
-    r_mdd_a, _ = pearsonr(df_a['mc_mdd_rank'], df_a['oos_profitable'].astype(float))
-
-    fig, axes = plt.subplots(2, 2, figsize=(14, 11))
-
-    ax = axes[0, 0]
-    for mom, color, label in [(True, C_TEAL, 'Momentum asset (has signal)'),
-                               (False, C_RED, 'Random walk (no signal)')]:
-        vals = df_b[df_b['has_momentum'] == mom]['mc_mdd_rank'].values
-        ax.hist(vals, bins=50, density=True, alpha=0.3, color=color,
-                edgecolor='white', linewidth=0.3)
-        if vals.std() > 0.5:
-            kde = gaussian_kde(vals, bw_method=0.1)
-            x = np.linspace(0, 100, 300)
-            ax.plot(x, kde(x), color=color, linewidth=2,
-                    label=f'{label}\n(mean={vals.mean():.1f}%)')
-    ax.axvline(50, color=C_GRAY, ls='--', lw=1.5, alpha=0.7)
-    ax.set_xlabel('MC MDD Percentile Rank')
-    ax.set_ylabel('Density')
-    ax.set_title('Data-Mining Scenario: MC MDD Rank by Asset Type',
-                 fontweight='bold', fontsize=10)
-    ax.legend(fontsize=7.5, loc='upper right')
-    r_b_mdd, _ = pearsonr(df_b['mc_mdd_rank'],
-                          df_b['oos_profitable'].astype(float))
-    ax.annotate(f'r vs OOS = {r_b_mdd:.4f}',
-                xy=(0.03, 0.95), xycoords='axes fraction', fontsize=8,
-                ha='left', va='top',
-                bbox=dict(boxstyle='round,pad=0.3', facecolor='#ffe0e0',
-                          edgecolor=C_RED, alpha=0.9))
-
-    ax = axes[0, 1]
-
-    def fcolor(f):
-        if 'MC' in f:
-            return C_RED
-        if 'Rob' in f:
-            return C_NAVY
-        return C_GRAY
-
-    bdf = b_filter_df[b_filter_df['Filter'] != 'No filter'].copy()
-    bdf = bdf.sort_values('OOS Prof%', ascending=True).reset_index(drop=True)
-    colors = [fcolor(f) for f in bdf['Filter']]
-    ax.barh(range(len(bdf)), bdf['OOS Prof%'], color=colors,
-            edgecolor='white', height=0.65, alpha=0.9)
-    ax.axvline(bl_b, color=C_GRAY, ls='--', lw=1.5, alpha=0.6)
-    ax.set_yticks(range(len(bdf)))
-    ylabels = [f"{r['Filter']}  (n={r['Pool']/1e3:.0f}K, {r['% Edge']:.0f}% edge)"
-               for _, r in bdf.iterrows()]
-    ax.set_yticklabels(ylabels, fontsize=8)
-    for i, (_, r) in enumerate(bdf.iterrows()):
-        lift = r['Lift (pp)']
-        c = C_GREEN if lift > 0 else C_RED
-        ax.text(r['OOS Prof%'] + 0.15, i, f'{lift:+.1f} pp',
-                va='center', fontsize=8, color=c, fontweight='bold')
-    ax.set_xlabel('OOS Profitability (%)')
-    ax.set_title('Data-Mining: Filter Effectiveness',
-                 fontweight='bold', fontsize=10)
-
-    ax = axes[1, 0]
-    sub = df_a.sample(min(5000, len(df_a)), random_state=42)
-    colors_s = [C_TEAL if e else C_RED for e in sub['has_edge']]
-    ax.scatter(sub['mc_mdd_rank'],
-               sub['oos_profitable'].astype(float) + np.random.normal(0, 0.02, len(sub)),
-               alpha=0.08, s=5, c=colors_s, zorder=2)
-    bins_arr = np.linspace(0, 100, 21)
-    sub_copy = sub.copy()
-    sub_copy['mdd_bin'] = pd.cut(sub_copy['mc_mdd_rank'], bins_arr)
-    binned = sub_copy.groupby('mdd_bin', observed=True)['oos_profitable'].mean()
-    bc = [(b.left + b.right) / 2 for b in binned.index]
-    ax.plot(bc, binned.values, 'ko-', linewidth=2, markersize=5, zorder=4,
-            label='Binned OOS rate')
-    ax.axhline(0.5, color=C_GRAY, ls='--', lw=1, alpha=0.5)
-    ax.set_xlabel('MC MDD Percentile Rank')
-    ax.set_ylabel('OOS Profitable (0/1)')
-    ax.set_title('MC MDD Rank vs OOS Profitability',
-                 fontweight='bold', fontsize=10)
-    ax.legend(fontsize=8)
-    ax.annotate(f'r = {r_mdd_a:.4f}',
-                xy=(0.97, 0.05), xycoords='axes fraction', fontsize=8,
-                ha='right', va='bottom',
-                bbox=dict(boxstyle='round,pad=0.3', facecolor='white',
-                          edgecolor=C_GRAY, alpha=0.9))
-
-    ax = axes[1, 1]
-    ax.hist(port_df['mc_rank'], bins=40, density=True, alpha=0.4,
-            color=C_PURPLE, edgecolor='white', linewidth=0.3)
-    if port_df['mc_rank'].std() > 0.5:
-        kde = gaussian_kde(port_df['mc_rank'].values, bw_method=0.15)
-        x = np.linspace(max(0, port_df['mc_rank'].min() - 5),
-                        min(100, port_df['mc_rank'].max() + 5), 300)
-        ax.plot(x, kde(x), color=C_PURPLE, linewidth=2)
-    ax.axvline(50, color=C_GRAY, ls='--', lw=1.5, alpha=0.7,
-               label='Random expectation')
-    ax.axvline(port_df['mc_rank'].mean(), color=C_RED, lw=2,
-               label=f'Mean = {port_df["mc_rank"].mean():.1f}%')
-    ax.set_xlabel('Portfolio MC ROI Percentile Rank')
-    ax.set_ylabel('Density')
-    ax.set_title(
-        f'Correlated Portfolios '
-        f'(mean \u03c1 = {port_df["mean_corr"].mean():.2f})',
-        fontweight='bold', fontsize=10)
-    ax.legend(fontsize=8)
-
-    fig.tight_layout()
-    savefig(fig, 'fig_synthetic_mc_analysis.pdf')
-
-
-# ---------------------------------------------------------------------------
-#  Figures 7 & 8: pre-saved synthetic pipeline summaries
-# ---------------------------------------------------------------------------
-def _load_pipeline_tables():
-    # Prefer the _matched.csv files produced by the current Rust synthetic
-    # pipeline; fall back to the legacy non-matched Python-era files.
-    sum_matched = TBL / 'synthetic_v4_summaries_matched.csv'
-    sum_legacy = TBL / 'synthetic_v4_summaries.csv'
-    if sum_matched.exists():
-        all_sum = pd.read_csv(sum_matched)
-    elif sum_legacy.exists():
-        all_sum = pd.read_csv(sum_legacy)
-    else:
-        return None
-    tiers = {
-        'null': all_sum[all_sum['tier'] == 'null'],
-        'edge': all_sum[all_sum['tier'] == 'edge'],
-        'adversarial': all_sum[all_sum['tier'] == 'adversarial'],
-    }
-
-    def _load_filters(tier):
-        matched = TBL / f'synthetic_v4_{tier}_filters_matched.csv'
-        legacy = TBL / f'synthetic_v4_{tier}_filters.csv'
-        if matched.exists():
-            df = pd.read_csv(matched)
-            # Rename matched snake_case schema to the Title-case the
-            # downstream figure code uses.
-            return df.rename(columns={
-                'filter': 'Filter', 'pool': 'Pool',
-                'oos_prof_pct': 'OOS Prof%', 'lift_pp': 'Lift (pp)',
-                'pool_pct': 'Pool %',
-            })
-        if legacy.exists():
-            return pd.read_csv(legacy)
-        return None
-
-    filters = {}
-    for tier in ('null', 'edge', 'adversarial'):
-        df = _load_filters(tier)
-        if df is not None:
-            filters[tier] = df
-    return tiers, filters
-
-
-def figure_7():
-    """Produce Fig 7 (fig_synthetic_pipeline_v4.pdf): full-pipeline synthetic overview."""
-    print('\n=== Figure 7: Synthetic Pipeline v4 Overview ===')
-    loaded = _load_pipeline_tables()
-    if loaded is None:
-        print('  synthetic_v4_summaries.csv missing, skipping.')
-        return
-    tiers, tier_filters = loaded
-    t1, t2, t3 = tiers['null'], tiers['edge'], tiers['adversarial']
-
-    sweep_matched = TBL / 'synthetic_v4_signal_sweep_matched.csv'
-    sweep_legacy = TBL / 'synthetic_v4_signal_sweep.csv'
-    if sweep_matched.exists():
-        sweep_df = pd.read_csv(sweep_matched)
-        # Matched schema encodes phi in the tier string as "sweep_phi_0.04".
-        sweep_df = sweep_df[sweep_df['tier'].str.startswith('sweep_phi_')].copy()
-        sweep_df['phi'] = sweep_df['tier'].str.replace('sweep_phi_', '',
-                                                       regex=False).astype(float)
-        sweep_df = sweep_df.rename(columns={
-            'mc_roi_lift_p50': 'mc_p50_lift',
-            'rob_all_lift': 'rob_lift',
-        })
-    elif sweep_legacy.exists():
-        sweep_df = pd.read_csv(sweep_legacy)
-        if 'rob_lift' not in sweep_df.columns:
-            sweep_df['rob_lift'] = np.nan  # legacy file lacks the column
-    else:
-        sweep_df = None
-
-    fig, axes = plt.subplots(2, 3, figsize=(18, 11))
-
-    ax = axes[0, 0]
-    tier_labels = ['Tier 1\n(Null)', 'Tier 2\n(Edge)', 'Tier 3\n(Adversarial)']
-    bl_vals = [t1['baseline_oos'].mean(), t2['baseline_oos'].mean(),
-               t3['baseline_oos'].mean()]
-    ax.bar(range(3), bl_vals, color=[C_NAVY, C_TEAL, C_RED], alpha=0.8,
-           edgecolor='white', width=0.6)
-    for i, v in enumerate(bl_vals):
-        ax.text(i, v + 0.5, f'{v:.1f}%', ha='center', fontsize=10, fontweight='bold')
-    ax.set_xticks(range(3))
-    ax.set_xticklabels(tier_labels, fontsize=10)
-    ax.set_ylabel('Baseline OOS Profitability (%)')
-    ax.set_title('Baseline OOS by Tier\n(no filtering)', fontweight='bold')
-    ax.axhline(50, color=C_GRAY, ls='--', lw=1.5)
-    ax.grid(axis='y', alpha=0.3)
-
-    ax = axes[0, 1]
-    filters_to_show = ['IS PF > 1', 'MC-ROI >= p50', 'MC-ROI >= p75',
-                       'Rob: Combined']
-    fcolors = [C_GRAY, C_RED, C_RED, C_NAVY]
-    x_pos = np.arange(3)
-    w = 0.2
-    for fi, (fname, fc) in enumerate(zip(filters_to_show, fcolors)):
-        vals = []
-        for tname in ['null', 'edge', 'adversarial']:
-            if tname in tier_filters:
-                tf = tier_filters[tname]
-                row = tf[tf['Filter'] == fname]
-                vals.append(row['Lift (pp)'].values[0] if len(row) else 0)
-            else:
-                vals.append(0)
-        offset = (fi - len(filters_to_show) / 2 + 0.5) * w
-        ax.bar(x_pos + offset, vals, w, color=fc, alpha=0.8,
-               label=fname, edgecolor='white')
-    ax.axhline(0, color=C_GRAY, ls='--', lw=1)
-    ax.set_xticks(x_pos)
-    ax.set_xticklabels(tier_labels, fontsize=9)
-    ax.set_ylabel('Lift vs Baseline (pp)')
-    ax.set_title('Filter Lift by Tier', fontweight='bold')
-    ax.legend(fontsize=7, loc='best')
-
-    ax = axes[0, 2]
-    if sweep_df is not None:
-        sweep_avg = sweep_df.groupby('phi').agg({
-            'baseline_oos': 'mean',
-            'mc_p50_lift': 'mean',
-            'rob_lift': 'mean',
-        }).reset_index()
-        ax.plot(sweep_avg['phi'], sweep_avg['mc_p50_lift'], 'o-',
-                color=C_RED, linewidth=2, markersize=5, label='MC-ROI p50 Lift')
-        ax.plot(sweep_avg['phi'], sweep_avg['rob_lift'], 's-',
-                color=C_NAVY, linewidth=2, markersize=5, label='Rob: Combined Lift')
-        ax.axhline(0, color=C_GRAY, ls='--', lw=1.5)
-        ax.set_xlabel('Signal Strength (AR coefficient)')
-        ax.set_ylabel('Lift vs Baseline (pp)')
-        ax.set_title('Filter Lift vs Signal Strength', fontweight='bold')
-        ax.legend(fontsize=9)
-    else:
-        ax.text(0.5, 0.5, 'Signal sweep data\nnot available',
-                ha='center', va='center', transform=ax.transAxes, fontsize=12)
-
-    ax = axes[1, 0]
-    for name, sdf, color in [
-        ('Tier 1: Null', t1, C_NAVY),
-        ('Tier 2: Edge', t2, C_TEAL),
-        ('Tier 3: Adversarial', t3, C_RED),
-    ]:
-        lifts = sdf['mc_roi_lift_p50'].dropna().values
-        if len(lifts) > 2:
-            ax.hist(lifts, bins=15, alpha=0.4, color=color,
-                    edgecolor='white', density=True,
-                    label=f'{name} (mean={lifts.mean():.2f})')
-            if lifts.std() > 0.01:
-                kde = gaussian_kde(lifts, bw_method=0.3)
-                xk = np.linspace(lifts.min() - 1, lifts.max() + 1, 200)
-                ax.plot(xk, kde(xk), color=color, lw=2)
-    ax.axvline(0, color=C_GRAY, ls='--', lw=1.5)
-    ax.set_xlabel('MC-ROI p50 Lift (pp)')
-    ax.set_ylabel('Density')
-    ax.set_title('MC Lift Distribution Across Runs', fontweight='bold')
-    ax.legend(fontsize=8)
-
-    ax = axes[1, 1]
-    for name, sdf, color in [
-        ('Tier 1: Null', t1, C_NAVY),
-        ('Tier 2: Edge', t2, C_TEAL),
-        ('Tier 3: Adversarial', t3, C_RED),
-    ]:
-        lifts = sdf['rob_all_lift'].dropna().values
-        if len(lifts) > 2:
-            ax.hist(lifts, bins=15, alpha=0.4, color=color,
-                    edgecolor='white', density=True,
-                    label=f'{name} (mean={lifts.mean():.2f})')
-            if lifts.std() > 0.01:
-                kde = gaussian_kde(lifts, bw_method=0.3)
-                xk = np.linspace(lifts.min() - 1, lifts.max() + 1, 200)
-                ax.plot(xk, kde(xk), color=color, lw=2)
-    ax.axvline(0, color=C_GRAY, ls='--', lw=1.5)
-    ax.set_xlabel('Rob: Combined Lift (pp)')
-    ax.set_ylabel('Density')
-    ax.set_title('Robustness Lift Distribution Across Runs', fontweight='bold')
-    ax.legend(fontsize=8)
-
-    ax = axes[1, 2]
-    for name, sdf, color, marker in [
-        ('Tier 1: Null', t1, C_NAVY, 'o'),
-        ('Tier 2: Edge', t2, C_TEAL, 's'),
-        ('Tier 3: Adversarial', t3, C_RED, '^'),
-    ]:
-        vals = sdf['port_nofilter_oos'].dropna().values
-        if len(vals) > 0:
-            ax.scatter(range(len(vals)), vals, color=color, marker=marker,
-                       s=40, alpha=0.7,
-                       label=f'{name} (mean={vals.mean():.1f}%)')
-    ax.axhline(50, color=C_GRAY, ls='--', lw=1.5, label='Null expectation (50%)')
-    ax.set_xlabel('Simulation Run')
-    ax.set_ylabel('Portfolio OOS Profitability (%)')
-    ax.set_title('Portfolio-Level Results Across Runs', fontweight='bold')
-    ax.legend(fontsize=8, loc='best')
-
-    fig.tight_layout()
-    savefig(fig, 'fig_synthetic_pipeline_v4.pdf')
-
-
-def figure_8():
-    """Produce Fig 8 (fig_synthetic_pipeline_detail.pdf): per-tier lift details."""
-    print('\n=== Figure 8: Synthetic Pipeline v4 Detail ===')
-    loaded = _load_pipeline_tables()
-    if loaded is None:
-        print('  synthetic_v4_summaries.csv missing, skipping.')
-        return
-    tiers, tier_filters = loaded
-    t1, t2, t3 = tiers['null'], tiers['edge'], tiers['adversarial']
-
-    fig, axes = plt.subplots(2, 2, figsize=(14, 11))
-
-    ax = axes[0, 0]
-    lifts_t1 = t1['mc_roi_lift_p50'].dropna().values
-    if len(lifts_t1) > 0:
-        ax.hist(lifts_t1, bins=12, density=True, alpha=0.5, color=C_NAVY,
-                edgecolor='white')
-        ax.axvline(0, color=C_RED, ls='--', lw=1.5, label='Zero lift')
-        ax.axvline(lifts_t1.mean(), color=C_NAVY, lw=2,
-                   label=f'Mean = {lifts_t1.mean():.2f} pp')
-        ax.set_xlabel('MC ROI p50 Lift (pp)')
-        ax.set_ylabel('Density')
-        ax.set_title('Tier 1 (Null): MC Lift Distribution', fontweight='bold')
-        ax.legend(fontsize=8)
-
-    ax = axes[0, 1]
-    lifts_t2 = t2['mc_roi_lift_p50'].dropna().values
-    if len(lifts_t2) > 0:
-        ax.hist(lifts_t2, bins=12, density=True, alpha=0.5, color=C_TEAL,
-                edgecolor='white')
-        ax.axvline(0, color=C_RED, ls='--', lw=1.5, label='Zero lift')
-        ax.axvline(lifts_t2.mean(), color=C_TEAL, lw=2,
-                   label=f'Mean = {lifts_t2.mean():.2f} pp')
-        ax.set_xlabel('MC ROI p50 Lift (pp)')
-        ax.set_ylabel('Density')
-        ax.set_title('Tier 2 (Edge): MC Lift Distribution', fontweight='bold')
-        ax.legend(fontsize=8)
-
-    ax = axes[1, 0]
-    if 'adversarial' in tier_filters:
-        tf = tier_filters['adversarial'].copy()
-        tf['Filter'] = tf['Filter'].str.replace('Rob: All', 'Rob: Combined')
-        tf = tf[tf['Filter'] != 'No filter']
-        tf = tf.sort_values('Lift (pp)', ascending=True).reset_index(drop=True)
-
-        def fcolor2(f):
-            if 'MC' in f:
-                return C_RED
-            if 'Rob' in f:
-                return C_NAVY
-            return C_GRAY
-
-        colors = [fcolor2(f) for f in tf['Filter']]
-        ax.barh(range(len(tf)), tf['Lift (pp)'], color=colors,
-                edgecolor='white', height=0.65, alpha=0.9)
-        ax.axvline(0, color=C_GRAY, ls='--', lw=1.5)
-        ax.set_yticks(range(len(tf)))
-        ax.set_yticklabels(tf['Filter'], fontsize=9)
-        ax.set_xlabel('Lift vs Baseline (pp)')
-        ax.set_title('Tier 3 (Adversarial): Filter Lifts', fontweight='bold')
-
-    ax = axes[1, 1]
-    tier_labels = ['Tier 1\n(Null)', 'Tier 2\n(Edge)', 'Tier 3\n(Adversarial)']
-    mc_means = [t1['mc_roi_lift_p50'].mean(),
-                t2['mc_roi_lift_p50'].mean(),
-                t3['mc_roi_lift_p50'].mean()]
-    rob_means = [t1['rob_all_lift'].mean(),
-                 t2['rob_all_lift'].mean(),
-                 t3['rob_all_lift'].mean()]
-    mc_cis = [(s['mc_roi_lift_p50'].quantile(0.025),
-               s['mc_roi_lift_p50'].quantile(0.975))
-              for s in [t1, t2, t3]]
-    rob_cis = [(s['rob_all_lift'].quantile(0.025),
-                s['rob_all_lift'].quantile(0.975))
-               for s in [t1, t2, t3]]
-    x_pos = np.arange(3)
-    w = 0.35
-    mc_err = [[m - ci[0] for m, ci in zip(mc_means, mc_cis)],
-              [ci[1] - m for m, ci in zip(mc_means, mc_cis)]]
-    rob_err = [[m - ci[0] for m, ci in zip(rob_means, rob_cis)],
-               [ci[1] - m for m, ci in zip(rob_means, rob_cis)]]
-    ax.bar(x_pos - w / 2, mc_means, w, color=C_RED, alpha=0.8,
-           label='MC-ROI p50', yerr=mc_err, capsize=4, ecolor=C_GRAY)
-    ax.bar(x_pos + w / 2, rob_means, w, color=C_NAVY, alpha=0.8,
-           label='Rob: Combined', yerr=rob_err, capsize=4, ecolor=C_GRAY)
-    ax.axhline(0, color=C_GRAY, ls='--', lw=1)
-    ax.set_xticks(x_pos)
-    ax.set_xticklabels(tier_labels, fontsize=9)
-    ax.set_ylabel('Lift vs Baseline (pp)')
-    ax.set_title('Filter Lift Across Tiers (95% CI)', fontweight='bold')
-    ax.legend(fontsize=9)
-
-    fig.tight_layout()
-    savefig(fig, 'fig_synthetic_pipeline_detail.pdf')
-
-
-# ---------------------------------------------------------------------------
-#  Figures 9 & 10: forex/commodity MC distributions and binned OOS
-# ---------------------------------------------------------------------------
-def figure_9():
-    """Produce Fig 9 (mc_pct_rank_distributions.pdf): forex/commodity MC rank distributions."""
-    print('\n=== Figure 9: MC Pct Rank Distributions (Forex/Commodity) ===')
-    merged = load_forex_data()
-    if not merged:
-        return
-    fig, axes = plt.subplots(3, 2, figsize=(14, 15))
-    axes_flat = axes.flatten()
-    for idx, a in enumerate(FOREX_ASSETS):
-        if a not in merged:
-            continue
-        ax = axes_flat[idx]
-        m = merged[a]
-        for col, label, color in [
-            ('roi_pct_rank', 'ROI', '#1f77b4'),
-            ('sharpe_pct_rank', 'Sharpe', '#ff7f0e'),
-            ('pf_pct_rank', 'PF', '#2ca02c'),
-        ]:
-            vals = m[col].dropna()
-            ax.hist(vals, bins=50, alpha=0.5,
-                    label=f'{label} (mean={vals.mean():.1f})',
-                    color=color, density=True)
-        ax.axvline(x=50, color='black', linestyle='--', alpha=0.5)
-        ax.set_xlabel('MC Percentile Rank')
-        ax.set_ylabel('Density')
-        ax.set_title(FOREX_LABELS[a])
-        ax.legend(fontsize=7)
-    axes_flat[-1].set_visible(False)
-    plt.suptitle(
-        'Distribution of MC Percentile Ranks (Per-Window IS) - Forex/Commodity',
-        fontsize=13)
-    plt.tight_layout()
-    savefig(fig, 'mc_pct_rank_distributions.pdf')
-
-
-def figure_10():
-    """Produce Fig 10 (mc_roi_vs_next_oos_binned.pdf): per-window MC rank vs OOS profitability."""
-    print('\n=== Figure 10: Per-Window MC ROI vs OOS (Forex/Commodity) ===')
-
-    fig, axes = plt.subplots(3, 2, figsize=(14, 15))
-    axes_flat = axes.flatten()
-
-    for idx, a in enumerate(FOREX_ASSETS):
-        ax = axes_flat[idx]
-        mc_path = RAW / f'{a.lower()}_mc_perwindow.csv'
-        wp_path = RAW / f'{a.lower()}_window_pairs.csv'
-        if not mc_path.exists() or not wp_path.exists():
-            print(f'  WARNING: missing data for {a}')
-            continue
-
-        mc = pd.read_csv(mc_path)
-        if 'window' in mc.columns and mc['window'].dtype == object:
-            mc['window_i'] = mc['window'].str.replace('W', '').astype(int)
-        mc_win = mc.groupby('window_i')['roi_pct_rank'].mean().reset_index()
-        mc_win.columns = ['window_i', 'mean_mc_rank']
-
-        wp = pd.read_csv(wp_path)
-        wp['oos_profitable'] = (wp['baseline_oos_pf'] > 1.0).astype(float)
-        wp_win = wp.groupby('window_i')['oos_profitable'].mean().reset_index()
-        wp_win.columns = ['window_i', 'oos_rate']
-        wp_win['oos_rate'] *= 100
-
-        wm = pd.merge(mc_win, wp_win, on='window_i')
-        print(f'  {a}: {len(wm)} windows')
-
-        if len(wm) < 3:
-            ax.text(0.5, 0.5, 'Insufficient data', transform=ax.transAxes,
-                    ha='center', va='center')
-            ax.set_title(FOREX_LABELS[a], fontweight='bold')
-            continue
-
-        x = wm['mean_mc_rank'].values
-        y = wm['oos_rate'].values
-
-        ax.scatter(x, y, s=60, color=C_NAVY, alpha=0.7, edgecolors='white',
-                   linewidth=0.5, zorder=3)
-
-        z = np.polyfit(x, y, 1)
-        x_line = np.linspace(x.min(), x.max(), 100)
-        ax.plot(x_line, np.polyval(z, x_line), color=C_RED, lw=2,
-                ls='--', alpha=0.8)
-
-        r_val, _ = pearsonr(x, y)
-        ax.text(0.97, 0.05, f'$r$ = {r_val:.3f}\n$n$ = {len(wm)}',
-                transform=ax.transAxes, ha='right', va='bottom',
-                fontsize=9, fontweight='bold',
-                bbox=dict(boxstyle='round,pad=0.3', fc='white',
-                          ec=C_GRAY, alpha=0.8))
-
-        pad = max((y.max() - y.min()) * 0.15, 2)
-        ax.set_ylim(y.min() - pad, y.max() + pad)
-
-        ax.set_xlabel('Mean MC ROI Percentile Rank (%)')
-        ax.set_ylabel('OOS Profitability Rate (%)')
-        ax.set_title(FOREX_LABELS[a], fontweight='bold')
-        ax.grid(alpha=0.2)
-
-    axes_flat[-1].set_visible(False)
-    plt.suptitle(
-        'Per-Window Mean MC ROI Rank vs OOS Profitability Rate '
-        '(Forex/Commodity)', fontsize=13)
-    plt.tight_layout()
-    savefig(fig, 'mc_roi_vs_next_oos_binned.pdf')
-
-
-if __name__ == '__main__':
-    print('=' * 70)
-    print('REGENERATING FIGURES 2-10 FOR THE PAPER')
-    print('=' * 70)
-    print(f'Output directory: {OUT}')
-    print()
-
-    figure_2()
-    figure_3()
-    figure_4()
-
-    print('\n--- Running Synthetic v3 Experiments (Figures 5-6) ---')
-    try:
-        syn = run_synthetic_v3()
-        figure_5(syn)
-        figure_6(syn)
-    except Exception as e:
-        import traceback
-        print(f'  ERROR in synthetic v3: {e}')
-        traceback.print_exc()
-
-    figure_7()
-    figure_8()
-    figure_9()
-    figure_10()
-
-    print('\n' + '=' * 70)
-    print('DONE')
-    print('=' * 70)
-    expected = [
-        'window_level_mc_vs_oos.pdf',
-        'fig_bootstrap_lift_distributions.pdf',
-        'fig_regime_robustness.pdf',
-        'fig_synthetic_mc_ranks.pdf',
-        'fig_synthetic_mc_analysis.pdf',
-        'fig_synthetic_pipeline_v4.pdf',
-        'fig_synthetic_pipeline_detail.pdf',
-        'mc_pct_rank_distributions.pdf',
-        'mc_roi_vs_next_oos_binned.pdf',
+def load_merged(short: str) -> pd.DataFrame:
+    rp = DATA / f"{short}_corrected_ranks.csv"
+    wp = DATA / f"{short}_window_pairs.csv"
+    if not rp.exists() or not wp.exists():
+        return pd.DataFrame()
+    r = pd.read_csv(rp); r['window_i'] = r['window'].str.replace('W', '').astype(int)
+    w = pd.read_csv(wp)
+    return pd.merge(w, r[['strategy','window_i','n_trades','actual_roi','actual_mdd',
+                          'actual_calmar','actual_ulcer','roi_rank_broken','mdd_rank',
+                          'calmar_rank','ulcer_rank']], on=['strategy','window_i'])
+
+
+# ----------------------------------------------------------------------
+# NEW: corrected MC rank distributions across crypto assets
+# ----------------------------------------------------------------------
+def fig_corrected_rank_distributions():
+    fig, axes = plt.subplots(4, 4, figsize=(15, 13), sharex=True, sharey='row')
+    bins = np.linspace(0, 100, 41)
+    cols = [
+        ("mdd_rank", "MDD (path-dependent)"),
+        ("calmar_rank", "Calmar (path-dependent)"),
+        ("ulcer_rank", "Ulcer (path-dependent)"),
+        ("roi_rank_broken", "ROI* (FP artefact)"),
     ]
-    for fname in expected:
-        status = 'OK' if (OUT / fname).exists() else 'MISSING'
-        print(f'  [{status}] {fname}')
+    asset_data = {}
+    for asset, short in ASSETS:
+        p = DATA / f"{short}_corrected_ranks.csv"
+        if p.exists(): asset_data[asset] = pd.read_csv(p)
+
+    for j, (col, label) in enumerate(cols):
+        for i, (asset, _) in enumerate(ASSETS):
+            ax = axes[i, j]
+            if asset not in asset_data:
+                ax.text(0.5, 0.5, "(no data)", ha="center", va="center",
+                        transform=ax.transAxes)
+                continue
+            v = asset_data[asset][col].dropna()
+            color = C_RED if "broken" in col else (C_NAVY if "mdd" in col else C_TEAL if "calmar" in col else C_PURPLE)
+            ax.hist(v, bins=bins, density=True, color=color, alpha=0.7)
+            ax.axvline(50, color="gray", ls="--", lw=1)
+            ax.set_xlim(0, 100)
+            ax.set_title(
+                f"{asset} — {label}\nmean={v.mean():.1f}  std={v.std():.1f}  %<50={(v<50).mean()*100:.1f}",
+                fontsize=9,
+            )
+            if i == 3: ax.set_xlabel("MC percentile rank")
+            if j == 0: ax.set_ylabel("Density")
+    fig.suptitle("MC rank distributions across crypto assets — "
+                 "MDD/Calmar/Ulcer center at 50 (no leftshift); "
+                 "ROI* (FP artefact)",
+                 fontsize=11, y=0.995)
+    plt.tight_layout()
+    out = FIGS / "fig_mc_rank_distributions_corrected.pdf"
+    plt.savefig(out, bbox_inches="tight")
+    plt.savefig(out.with_suffix(".png"), dpi=130, bbox_inches="tight")
+    print(f"Wrote {out}")
+    plt.close(fig)
+
+
+# ----------------------------------------------------------------------
+# Fig 3: bootstrap lift distribution (MC-MDD p50, crypto pooled)
+# ----------------------------------------------------------------------
+def fig3_bootstrap_lift_corrected(n_boot=10000):
+    rng = np.random.default_rng(42)
+    # collect per-window lift estimates pooled across assets, with cluster=window
+    all_lift = []
+    cluster_ids = []
+    for asset, short in ASSETS:
+        m = load_merged(short)
+        if len(m) == 0: continue
+        m = m[m['baseline_oos_pf'].notna()].copy()
+        m['oos_prof'] = (m['baseline_oos_pf'] > 1.0).astype(float)
+        m['passing'] = (m['mdd_rank'] >= 50).astype(int)
+        for w, g in m.groupby('window_i'):
+            base = g['oos_prof'].mean()
+            passing = g[g['passing'] == 1]
+            if len(passing) == 0: continue
+            lift = (passing['oos_prof'].mean() - base) * 100
+            all_lift.append(lift)
+            cluster_ids.append(f"{asset}_W{w:02d}")
+    all_lift = np.array(all_lift)
+    if len(all_lift) == 0:
+        print("  [skip] fig3 — no merged data")
+        return
+    print(f"  Fig3: {len(all_lift)} per-window MC-MDD-p50 lift estimates pooled across crypto")
+
+    # cluster bootstrap
+    boots = np.empty(n_boot)
+    idx_n = len(all_lift)
+    for b in range(n_boot):
+        idx = rng.integers(0, idx_n, size=idx_n)
+        boots[b] = all_lift[idx].mean()
+
+    fig, axes = plt.subplots(1, 2, figsize=(13, 4.5))
+    ax = axes[0]
+    ax.hist(all_lift, bins=30, density=True, alpha=0.5, color=C_RED, edgecolor="white")
+    try:
+        kde = gaussian_kde(all_lift, bw_method=0.3)
+        x = np.linspace(all_lift.min()-2, all_lift.max()+2, 300)
+        ax.plot(x, kde(x), color=C_RED, lw=2)
+    except Exception: pass
+    ax.axvline(0, color="gray", ls="--", lw=1)
+    ax.axvline(all_lift.mean(), color=C_NAVY, lw=2, label=f"mean = {all_lift.mean():.2f} pp")
+    ax.set_xlabel("Per-window MC-MDD p50 filter lift (pp)")
+    ax.set_ylabel("Density")
+    ax.set_title("(A) Window-level MC-MDD filter lift distribution\n(crypto pooled, cluster = window)")
+    ax.legend()
+
+    ax = axes[1]
+    ax.hist(boots, bins=50, density=True, alpha=0.5, color=C_RED, edgecolor="white")
+    try:
+        kde = gaussian_kde(boots, bw_method=0.3)
+        x = np.linspace(boots.min(), boots.max(), 300)
+        ax.plot(x, kde(x), color=C_RED, lw=2)
+    except Exception: pass
+    lo, hi = np.percentile(boots, [2.5, 97.5])
+    ax.axvline(0, color="gray", ls="--", lw=1)
+    ax.axvline(boots.mean(), color=C_NAVY, lw=2, label=f"boot mean = {boots.mean():.2f} pp")
+    ax.axvspan(lo, hi, alpha=0.15, color=C_NAVY, label=f"95% CI [{lo:.2f}, {hi:.2f}]")
+    ax.set_xlabel("Bootstrapped mean MC-MDD lift (pp)")
+    ax.set_title(f"(B) Cluster-bootstrap distribution ({n_boot:,} resamples)")
+    ax.legend()
+
+    fig.suptitle("Fig 3: MC-MDD p50 filter lift on same-window OOS profitability — "
+                 "informative MC rank, crypto pooled", fontsize=11, y=1.02)
+    plt.tight_layout()
+    out = FIGS / "fig3_bootstrap_lift_corrected.pdf"
+    plt.savefig(out, bbox_inches="tight")
+    plt.savefig(out.with_suffix(".png"), dpi=130, bbox_inches="tight")
+    print(f"Wrote {out}")
+    plt.close(fig)
+
+
+# ----------------------------------------------------------------------
+# Fig 4 (analogue): per-window MC-MDD rank vs OOS profitability — crypto
+# ----------------------------------------------------------------------
+def fig4_window_mc_vs_oos_corrected():
+    fig, axes = plt.subplots(1, 4, figsize=(18, 4.5))
+    for i, (asset, short) in enumerate(ASSETS):
+        ax = axes[i]
+        m = load_merged(short)
+        if len(m) == 0:
+            ax.text(0.5, 0.5, "no data", ha="center", va="center", transform=ax.transAxes)
+            continue
+        m = m[m['baseline_oos_pf'].notna()].copy()
+        m['oos_prof'] = (m['baseline_oos_pf'] > 1.0).astype(float)
+        per_w = m.groupby('window_i').agg(
+            mc=('mdd_rank','mean'),
+            oos=('oos_prof','mean'),
+            n=('strategy','count'),
+        ).reset_index()
+        ax.scatter(per_w['mc'], per_w['oos']*100, s=30, color=C_NAVY, alpha=0.7)
+        ax.axvline(50, color="gray", ls="--", lw=1)
+        ax.axhline(per_w['oos'].mean()*100, color="gray", ls=":", lw=1,
+                   label=f"baseline = {per_w['oos'].mean()*100:.1f}%")
+        ax.set_xlabel("Mean MC-MDD rank in window")
+        ax.set_ylabel("OOS profitable rate (%)")
+        ax.set_title(f"{asset}: per-window MC-MDD rank vs OOS profitability\n({len(per_w)} windows)")
+        ax.legend(fontsize=8)
+    fig.suptitle("Fig 4: per-window MC-MDD rank vs OOS profitability — crypto",
+                 fontsize=11, y=1.02)
+    plt.tight_layout()
+    out = FIGS / "fig4_regime_robustness_corrected.pdf"
+    plt.savefig(out, bbox_inches="tight")
+    plt.savefig(out.with_suffix(".png"), dpi=130, bbox_inches="tight")
+    print(f"Wrote {out}")
+    plt.close(fig)
+
+
+# ----------------------------------------------------------------------
+# Forex versions of the rank-distribution and per-window MC-vs-OOS figures.
+# Mirror the crypto layout but with 3 forex pairs in place of 4 crypto.
+# These fill the placeholders flagged in sections/A5_appendix_forex.tex.
+# ----------------------------------------------------------------------
+def fig_corrected_rank_distributions_forex():
+    n_assets = len(FOREX_ASSETS)
+    fig, axes = plt.subplots(n_assets, 4, figsize=(15, 3.3 * n_assets), sharex=True, sharey='row')
+    bins = np.linspace(0, 100, 41)
+    cols = [
+        ("mdd_rank", "MDD (path-dependent)"),
+        ("calmar_rank", "Calmar (path-dependent)"),
+        ("ulcer_rank", "Ulcer (path-dependent)"),
+        ("roi_rank_broken", "ROI* (FP artefact)"),
+    ]
+    asset_data = {}
+    for asset, short in FOREX_ASSETS:
+        p = DATA / f"{short}_corrected_ranks.csv"
+        if p.exists(): asset_data[asset] = pd.read_csv(p)
+
+    for j, (col, label) in enumerate(cols):
+        for i, (asset, _) in enumerate(FOREX_ASSETS):
+            ax = axes[i, j]
+            if asset not in asset_data:
+                ax.text(0.5, 0.5, "(no data)", ha="center", va="center",
+                        transform=ax.transAxes)
+                continue
+            v = asset_data[asset][col].dropna()
+            color = C_RED if "broken" in col else (C_NAVY if "mdd" in col else C_TEAL if "calmar" in col else C_PURPLE)
+            ax.hist(v, bins=bins, density=True, color=color, alpha=0.7)
+            ax.axvline(50, color="gray", ls="--", lw=1)
+            ax.set_xlim(0, 100)
+            ax.set_title(
+                f"{asset} — {label}\nmean={v.mean():.1f}  std={v.std():.1f}  %<50={(v<50).mean()*100:.1f}",
+                fontsize=9,
+            )
+            if i == n_assets - 1: ax.set_xlabel("MC percentile rank")
+            if j == 0: ax.set_ylabel("Density")
+    fig.suptitle("MC rank distributions across forex pairs — "
+                 "MDD/Calmar/Ulcer center near 50 (no leftshift); "
+                 "ROI* artefact more extreme than crypto (smaller R-unit pnls amplify FP noise)",
+                 fontsize=11, y=0.995)
+    plt.tight_layout()
+    out = FIGS / "fig_mc_rank_distributions_corrected_forex.pdf"
+    plt.savefig(out, bbox_inches="tight")
+    plt.savefig(out.with_suffix(".png"), dpi=130, bbox_inches="tight")
+    print(f"Wrote {out}")
+    plt.close(fig)
+
+
+def fig4_window_mc_vs_oos_corrected_forex():
+    n = len(FOREX_ASSETS)
+    fig, axes = plt.subplots(1, n, figsize=(4.7 * n, 4.5))
+    if n == 1:
+        axes = [axes]
+    for i, (asset, short) in enumerate(FOREX_ASSETS):
+        ax = axes[i]
+        m = load_merged(short)
+        if len(m) == 0:
+            ax.text(0.5, 0.5, "no data", ha="center", va="center", transform=ax.transAxes)
+            continue
+        m = m[m['baseline_oos_pf'].notna()].copy()
+        m['oos_prof'] = (m['baseline_oos_pf'] > 1.0).astype(float)
+        per_w = m.groupby('window_i').agg(
+            mc=('mdd_rank','mean'),
+            oos=('oos_prof','mean'),
+            n=('strategy','count'),
+        ).reset_index()
+        ax.scatter(per_w['mc'], per_w['oos']*100, s=30, color=C_NAVY, alpha=0.7)
+        ax.axvline(50, color="gray", ls="--", lw=1)
+        ax.axhline(per_w['oos'].mean()*100, color="gray", ls=":", lw=1,
+                   label=f"baseline = {per_w['oos'].mean()*100:.1f}%")
+        ax.set_xlabel("Mean MC-MDD rank in window")
+        ax.set_ylabel("OOS profitable rate (%)")
+        ax.set_title(f"{asset}: per-window MC-MDD rank vs OOS profitability\n({len(per_w)} windows)")
+        ax.legend(fontsize=8)
+    fig.suptitle("Fig 4 (forex): per-window MC-MDD rank vs OOS profitability",
+                 fontsize=11, y=1.02)
+    plt.tight_layout()
+    out = FIGS / "fig4_regime_robustness_corrected_forex.pdf"
+    plt.savefig(out, bbox_inches="tight")
+    plt.savefig(out.with_suffix(".png"), dpi=130, bbox_inches="tight")
+    print(f"Wrote {out}")
+    plt.close(fig)
+
+
+def fig3_bootstrap_lift_corrected_forex(n_boot=10000):
+    """Forex pooled equivalent of fig3 — same cluster-bootstrap design."""
+    rng = np.random.default_rng(43)
+    all_lift = []
+    for asset, short in FOREX_ASSETS:
+        m = load_merged(short)
+        if len(m) == 0: continue
+        m = m[m['baseline_oos_pf'].notna()].copy()
+        m['oos_prof'] = (m['baseline_oos_pf'] > 1.0).astype(float)
+        m['passing'] = (m['mdd_rank'] >= 50).astype(int)
+        for w, g in m.groupby('window_i'):
+            base = g['oos_prof'].mean()
+            passing = g[g['passing'] == 1]
+            if len(passing) == 0: continue
+            lift = (passing['oos_prof'].mean() - base) * 100
+            all_lift.append(lift)
+    all_lift = np.array(all_lift)
+    if len(all_lift) == 0:
+        print("  [skip] fig3_forex — no merged data")
+        return
+    print(f"  Fig3-forex: {len(all_lift)} per-window MC-MDD-p50 lift estimates pooled across forex")
+
+    boots = np.empty(n_boot)
+    for b in range(n_boot):
+        idx = rng.integers(0, len(all_lift), size=len(all_lift))
+        boots[b] = all_lift[idx].mean()
+
+    fig, axes = plt.subplots(1, 2, figsize=(13, 4.5))
+    ax = axes[0]
+    ax.hist(all_lift, bins=30, density=True, alpha=0.5, color=C_RED, edgecolor="white")
+    try:
+        kde = gaussian_kde(all_lift, bw_method=0.3)
+        x = np.linspace(all_lift.min()-2, all_lift.max()+2, 300)
+        ax.plot(x, kde(x), color=C_RED, lw=2)
+    except Exception: pass
+    ax.axvline(0, color="gray", ls="--", lw=1)
+    ax.axvline(all_lift.mean(), color=C_NAVY, lw=2, label=f"mean = {all_lift.mean():.2f} pp")
+    ax.set_xlabel("Per-window MC-MDD p50 filter lift (pp)")
+    ax.set_ylabel("Density")
+    ax.set_title("(A) Window-level MC-MDD filter lift distribution\n(forex pooled, cluster = window)")
+    ax.legend()
+
+    ax = axes[1]
+    ax.hist(boots, bins=50, density=True, alpha=0.5, color=C_RED, edgecolor="white")
+    try:
+        kde = gaussian_kde(boots, bw_method=0.3)
+        x = np.linspace(boots.min(), boots.max(), 300)
+        ax.plot(x, kde(x), color=C_RED, lw=2)
+    except Exception: pass
+    lo, hi = np.percentile(boots, [2.5, 97.5])
+    ax.axvline(0, color="gray", ls="--", lw=1)
+    ax.axvline(boots.mean(), color=C_NAVY, lw=2, label=f"boot mean = {boots.mean():.2f} pp")
+    ax.axvspan(lo, hi, alpha=0.15, color=C_NAVY, label=f"95% CI [{lo:.2f}, {hi:.2f}]")
+    ax.set_xlabel("Bootstrapped mean MC-MDD lift (pp)")
+    ax.set_title(f"(B) Cluster-bootstrap distribution ({n_boot:,} resamples)")
+    ax.legend()
+
+    fig.suptitle("Fig 3 (forex): MC-MDD p50 filter lift on same-window OOS profitability — "
+                 "forex pooled", fontsize=11, y=1.02)
+    plt.tight_layout()
+    out = FIGS / "fig3_bootstrap_lift_corrected_forex.pdf"
+    plt.savefig(out, bbox_inches="tight")
+    plt.savefig(out.with_suffix(".png"), dpi=130, bbox_inches="tight")
+    print(f"Wrote {out}")
+    plt.close(fig)
+
+
+if __name__ == "__main__":
+    fig_corrected_rank_distributions()
+    fig3_bootstrap_lift_corrected()
+    fig4_window_mc_vs_oos_corrected()
+    fig_corrected_rank_distributions_forex()
+    fig3_bootstrap_lift_corrected_forex()
+    fig4_window_mc_vs_oos_corrected_forex()
+
+# ======================================================================
+# === Section: Fig 5/6 synthetic MC ranks + edge-strat panels ===
+# ======================================================================
+
+"""
+Rebuild paper Figures 5 and 6 (synthetic MC rank distributions) using corrected
+MDD/Calmar ranks. Uses synthetic_*_rowlevel.csv from synthetic_scenarios.py.
+
+Fig 5 (corrected): synthetic A/B MC rank distributions, MDD + Calmar panels
+Fig 6 (corrected): edge-vs-null stratified MC rank distributions
+"""
+import os
+from pathlib import Path
+import numpy as np
+import pandas as pd
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+from scipy.stats import gaussian_kde
+
+ROOT = Path(os.environ.get("MC_PAPER_DATA", Path(__file__).resolve().parents[1]))
+DATA = ROOT / "results" / "raw_data"
+FIGS = ROOT / "results" / "figures"
+FIGS.mkdir(parents=True, exist_ok=True)
+
+C_NAVY = "#1F3864"; C_TEAL = "#2E8B57"; C_RED = "#C0392B"
+
+
+def fig5_corrected():
+    df_a = pd.read_csv(DATA / "synthetic_a_rowlevel.csv")
+    df_b = pd.read_csv(DATA / "synthetic_b_rowlevel.csv")
+    df_c = pd.read_csv(DATA / "synthetic_cmp_rowlevel.csv")
+
+    fig, axes = plt.subplots(3, 3, figsize=(15, 11), sharex=True)
+    bins = np.linspace(0, 100, 41)
+    rowdata = [("A (high prev, n=300)", df_a), ("B (low prev 2%, n=150)", df_b),
+               ("CMP (8 sims, n=312)", df_c)]
+    cols = [("mc_mdd","MDD (path-dep)",C_NAVY), ("mc_calmar","Calmar (path-dep)",C_TEAL),
+            ("mc_roi","ROI* (FP artefact)",C_RED)]
+    for r, (label, df) in enumerate(rowdata):
+        for c, (col, mname, color) in enumerate(cols):
+            ax = axes[r, c]
+            v = df[col].dropna()
+            ax.hist(v, bins=bins, density=True, color=color, alpha=0.7)
+            ax.axvline(50, color="gray", ls="--", lw=1)
+            ax.set_title(f"{label} — {mname}\nmean={v.mean():.1f} std={v.std():.1f} %<50={(v<50).mean()*100:.1f}",
+                         fontsize=9)
+            ax.set_xlim(0, 100)
+            if r == 2: ax.set_xlabel("MC percentile rank")
+            if c == 0: ax.set_ylabel("Density")
+    fig.suptitle("Fig 5: synthetic-pipeline MC rank distributions — "
+                 "MDD/Calmar (informative) vs ROI* (FP artefact)",
+                 fontsize=11, y=0.995)
+    plt.tight_layout()
+    plt.savefig(FIGS / "fig5_synthetic_mc_ranks_corrected.pdf", bbox_inches="tight")
+    plt.savefig(FIGS / "fig5_synthetic_mc_ranks_corrected.png", dpi=130, bbox_inches="tight")
+    print(f"Wrote {FIGS / 'fig5_synthetic_mc_ranks_corrected.pdf'}")
+    plt.close(fig)
+
+
+def fig6_corrected():
+    # Edge-vs-null stratified distributions on the largest pool (CMP)
+    df = pd.read_csv(DATA / "synthetic_cmp_rowlevel.csv")
+    edge = df[df["edge_flag"] == 1]
+    null = df[df["edge_flag"] == 0]
+    fig, axes = plt.subplots(2, 3, figsize=(15, 8), sharex=True)
+    bins = np.linspace(0, 100, 41)
+    cols = [("mc_mdd","MDD (path-dep)",C_NAVY), ("mc_calmar","Calmar (path-dep)",C_TEAL),
+            ("mc_roi","ROI* (FP artefact)",C_RED)]
+    for r, (sub, label) in enumerate([(null, "Null windows (no edge)"),
+                                       (edge, "Edge windows (alpha>0)")]):
+        for c, (col, mname, color) in enumerate(cols):
+            ax = axes[r, c]
+            v = sub[col].dropna()
+            ax.hist(v, bins=bins, density=True, color=color, alpha=0.7)
+            ax.axvline(50, color="gray", ls="--", lw=1)
+            ax.set_title(f"{label} — {mname}\n"
+                         f"N={len(v)}  mean={v.mean():.1f} std={v.std():.1f}",
+                         fontsize=9)
+            ax.set_xlim(0, 100)
+            if r == 1: ax.set_xlabel("MC percentile rank")
+            if c == 0: ax.set_ylabel("Density")
+    fig.suptitle("Fig 6: MC rank by edge condition — "
+                 "edge windows shift MDD/Calmar ranks consistent with stronger trading patterns",
+                 fontsize=11, y=1.00)
+    plt.tight_layout()
+    plt.savefig(FIGS / "fig6_synthetic_edge_strat_corrected.pdf", bbox_inches="tight")
+    plt.savefig(FIGS / "fig6_synthetic_edge_strat_corrected.png", dpi=130, bbox_inches="tight")
+    print(f"Wrote {FIGS / 'fig6_synthetic_edge_strat_corrected.pdf'}")
+    plt.close(fig)
+
+
+if __name__ == "__main__":
+    fig5_corrected()
+    fig6_corrected()
+
+# ======================================================================
+# === Section: Fig 7/8 synthetic tier-lift + signal-sweep panels ===
+# ======================================================================
+
+"""
+Render the two figures placeholdered as Fig 7 / Fig 8 in §A3:
+  Fig 7: per-tier MC-filter-lift bar chart (4 filters x 3 tiers).
+         Path-dependent MC filters (MDD/Calmar/Ulcer) and the artefactual
+         MC-ROI* shown side-by-side; error bars from the 95% CI columns.
+  Fig 8: signal-strength sweep — lift vs phi for the 4 filter columns,
+         showing all path-dependent filters stay negative (or near zero)
+         across signal strengths.
+
+Outputs:
+  results/figures/fig7_synthetic_tier_lift_corrected.pdf (+ .png)
+  results/figures/fig8_synthetic_signal_sweep_corrected.pdf (+ .png)
+"""
+import os
+from pathlib import Path
+import re
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+ROOT = Path(os.environ.get("MC_PAPER_DATA", Path(__file__).resolve().parents[1]))
+TBL = ROOT / "results" / "tables"
+FIG = ROOT / "results" / "figures"
+FIG.mkdir(parents=True, exist_ok=True)
+
+
+def parse_ci(s):
+    if pd.isna(s):
+        return (np.nan, np.nan)
+    m = re.match(r"\[\s*(-?[0-9.]+),\s*(-?[0-9.]+)\s*\]", str(s))
+    if not m:
+        return (np.nan, np.nan)
+    return float(m.group(1)), float(m.group(2))
+
+
+def fig7_tier_lift():
+    df = pd.read_csv(TBL / "table23_synthetic_tier_summary_corrected.csv")
+    tiers = df["Tier"].tolist()
+    filters = [
+        ("MC-MDD", "MC-MDD mean (pp)", "MC-MDD 95% CI"),
+        ("MC-Calmar", "MC-Calmar mean (pp)", "MC-Calmar 95% CI"),
+        ("MC-Ulcer", "MC-Ulcer mean (pp)", "MC-Ulcer 95% CI"),
+        ("MC-ROI* (artefact)", "MC-ROI* (artefactual) mean (pp)", "MC-ROI* (artefactual) 95% CI"),
+    ]
+    colors = ["#1F3864", "#2E8B57", "#7E57C2", "#C0392B"]
+
+    x = np.arange(len(tiers))
+    width = 0.18
+    fig, ax = plt.subplots(figsize=(11, 5.5))
+    for i, (label, mcol, cicol) in enumerate(filters):
+        means = df[mcol].astype(float).values
+        cis = df[cicol].apply(parse_ci)
+        err_lo = means - cis.apply(lambda t: t[0]).values
+        err_hi = cis.apply(lambda t: t[1]).values - means
+        ax.bar(x + (i - 1.5) * width, means, width, label=label, color=colors[i],
+               yerr=[err_lo, err_hi], capsize=4, alpha=0.85)
+    ax.axhline(0, color="gray", linewidth=0.8)
+    ax.set_xticks(x)
+    ax.set_xticklabels(tiers, rotation=0, fontsize=10)
+    ax.set_ylabel("MC filter lift on OOS profitability (pp)")
+    ax.set_title("Synthetic full-pipeline MC lift by tier (path-dependent)\n"
+                 "All three path-dependent filters produce significant negative lift on iid synthetic; "
+                 "the artefactual MC-ROI* filter matches.")
+    ax.legend(loc="lower right", fontsize=9)
+    ax.grid(axis="y", alpha=0.3)
+    plt.tight_layout()
+    out = FIG / "fig7_synthetic_tier_lift_corrected.pdf"
+    plt.savefig(out, bbox_inches="tight")
+    plt.savefig(out.with_suffix(".png"), dpi=130, bbox_inches="tight")
+    print(f"Wrote {out}")
+    plt.close(fig)
+
+
+def fig8_signal_sweep():
+    df = pd.read_csv(TBL / "table25_synthetic_signal_sweep_corrected.csv")
+    phi = df["phi"].astype(float).values
+    filters = [
+        ("MC-MDD", "MC-MDD lift (pp)", "#1F3864"),
+        ("MC-Calmar", "MC-Calmar lift (pp)", "#2E8B57"),
+        ("MC-Ulcer", "MC-Ulcer lift (pp)", "#7E57C2"),
+        ("MC-ROI* (artefact)", "MC-ROI* (artefactual) lift (pp)", "#C0392B"),
+    ]
+    fig, ax = plt.subplots(figsize=(10, 5.5))
+    for label, col, color in filters:
+        ax.plot(phi, df[col].astype(float).values, "o-", color=color, label=label, linewidth=2, markersize=7)
+    ax.axhline(0, color="gray", linewidth=0.8)
+    ax.set_xlabel(r"Signal strength $\varphi$ (synthetic momentum parameter)")
+    ax.set_ylabel("MC filter lift on OOS profitability (pp)")
+    ax.set_title("Signal-strength sweep: MC lift vs. embedded signal\n"
+                 "Path-dependent filters stay non-positive across all signal levels; "
+                 "the artefactual filter is more variable but never positive.")
+    ax.legend(loc="lower right", fontsize=9)
+    ax.grid(alpha=0.3)
+    plt.tight_layout()
+    out = FIG / "fig8_synthetic_signal_sweep_corrected.pdf"
+    plt.savefig(out, bbox_inches="tight")
+    plt.savefig(out.with_suffix(".png"), dpi=130, bbox_inches="tight")
+    print(f"Wrote {out}")
+    plt.close(fig)
+
+
+def main():
+    fig7_tier_lift()
+    fig8_signal_sweep()
+
+
+if __name__ == "__main__":
+    main()
+
+# ======================================================================
+# === Section: Fig portfolio MC right-shift ===
+# ======================================================================
+
+#!/usr/bin/env python3
+"""Portfolio MC-MDD percentile-rank distributions across the nine instruments.
+Visualises the right-shift documented in Section 6.2 / Table tab:portfolio_mc."""
+import os
+import pandas as pd, numpy as np
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+from pathlib import Path
+
+ROOT = Path(os.environ.get("MC_PAPER_DATA", Path(__file__).resolve().parents[1]))
+SRC  = ROOT / "results" / "raw_data" / "portfolio_mc_corrected_all.csv"
+OUTS = [ROOT / "results" / "figures" / "fig_portfolio_mc_rightshift.pdf"]
+
+C_NAVY = "#1F3864"; C_GRAY = "#777"
+plt.rcParams.update({"font.size": 10, "font.family": "serif"})
+
+df = pd.read_csv(SRC)
+# (asset key, display label)
+order = [("BTC","BTC"),("DOGE","DOGE"),("BNB","BNB"),("SOL","SOL"),
+         ("EURUSD","EUR/USD"),("USDJPY","USD/JPY"),("EURGBP","EUR/GBP"),
+         ("XAUUSD","XAU/USD"),("WTI","WTI")]
+bins = np.linspace(0, 100, 41)            # 40 bins, width 2.5
+uniform_density = 1.0 / 100.0             # exchangeable null is ~uniform on [0,100]
+
+C_RED = "#C0392B"
+fig, axes = plt.subplots(3, 3, figsize=(12, 10), sharex=True, sharey=True)
+for ax, (key, label) in zip(axes.ravel(), order):
+    s = df[df.asset == key]
+    mdd = s["port_mdd_rank"].dropna().values
+    roi = s["port_roi_rank_broken"].dropna().values        # sum-based, artefact-prone
+    m_mdd, m_roi = mdd.mean(), roi.mean()
+    # path-dependent MDD: filled navy
+    ax.hist(mdd, bins=bins, density=True, color=C_NAVY, alpha=0.75,
+            label=f"MC-MDD (path-dependent), mean {m_mdd:.0f}")
+    # sum-based ROI*: red outline (artefact-prone control)
+    ax.hist(roi, bins=bins, density=True, histtype="step", color=C_RED, lw=1.6,
+            label=f"MC-ROI* (sum-based), mean {m_roi:.0f}")
+    ax.axhline(uniform_density, color=C_GRAY, ls=":", lw=1)      # exchangeable null
+    ax.axvline(50, color=C_GRAY, ls="--", lw=1)                  # 50% benchmark
+    ax.set_title(f"{label}", fontsize=10)
+    ax.set_xlim(0, 100); ax.set_ylim(0, 0.05)
+    ax.legend(fontsize=6.6, loc="upper center", framealpha=0.9)
+for ax in axes[-1]:
+    ax.set_xlabel("portfolio percentile rank")
+for ax in axes[:, 0]:
+    ax.set_ylabel("density")
+
+fig.suptitle("Portfolio MC rank distributions ($K=10$ IS-PF$>$1 portfolios): the path-dependent MDD "
+             "right-shifts above 50,\nbut the artefact-prone sum-based ROI* does not "
+             "(left of 50 on crypto/commodity; degenerate at 0 on forex)",
+             fontsize=10.5, y=0.998)
+fig.tight_layout(rect=[0, 0, 1, 0.96])
+for out in OUTS:
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out, bbox_inches="tight")
+    fig.savefig(out.with_suffix(".png"), dpi=130, bbox_inches="tight")
+print("saved:", [str(o) for o in OUTS])
+
+# ======================================================================
+# === Section: Fig gold MC (cross-asset) ===
+# ======================================================================
+
+#!/usr/bin/env python3
+"""Gold-standard (bar-permutation) MC summary figure across the nine instruments.
+Panel A: in-sample edge (PF and MDD percentile ranks vs the 50% benchmark).
+Panel B: forward-OOS lift from filtering on the gold-standard MC-MDD rank (vs 0).
+Sources the per-instrument aggregate JSONs that also produce Table tab:gold_mc."""
+import os
+import json, numpy as np
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+from pathlib import Path
+
+ROOT = Path(os.environ.get("MC_PAPER_DATA", Path(__file__).resolve().parents[1]))
+AGG  = ROOT / "results" / "tables"
+OUTS = [ROOT / "results" / "figures" / "fig_gold_mc.pdf"]
+
+C_NAVY="#1F3864"; C_TEAL="#2E8B57"; C_RED="#C0392B"; C_GRAY="#777"
+plt.rcParams.update({"font.size": 10, "font.family": "serif"})
+
+# (json key, display label, asset class)
+rows = [("btc","BTC","crypto"),("doge","DOGE","crypto"),("bnb","BNB","crypto"),
+        ("sol","SOL","crypto"),("eurusd","EUR/USD","forex"),("usdjpy","USD/JPY","forex"),
+        ("eurgbp","EUR/GBP","forex"),("xauusd","XAU/USD","commodity"),("wti","WTI","commodity")]
+labels, pf, mdd, lift = [], [], [], []
+for key,label,_ in rows:
+    d = json.load(open(AGG / f"gold_mc_{key}_agg.json"))
+    labels.append(label)
+    pf.append(d["rank_dist"]["PF"]["mean"])
+    mdd.append(d["rank_dist"]["MDD"]["mean"])
+    lift.append(d["lifts"]["gold_mdd"]["lift"])
+
+y = np.arange(len(rows))[::-1]      # top-to-bottom in listed order
+h = 0.38
+
+fig, (axA, axB) = plt.subplots(1, 2, figsize=(13, 6))
+
+# Panel A: in-sample ranks
+axA.barh(y+h/2, pf,  height=h, color=C_TEAL, label="PF rank (higher = beats replays)")
+axA.barh(y-h/2, mdd, height=h, color=C_NAVY, label="MDD rank (lower = better drawdowns)")
+axA.axvline(50, color=C_GRAY, ls="--", lw=1.2)
+axA.text(50, len(rows)-0.3, " 50% (no edge)", color=C_GRAY, fontsize=8, va="bottom")
+axA.set_yticks(y); axA.set_yticklabels(labels)
+axA.set_xlim(0,100); axA.set_xlabel("mean in-sample percentile rank vs bar-permutation replays")
+axA.set_title("(A) In-sample edge over stationary-bar replays")
+axA.legend(fontsize=8, loc="lower right")
+
+# Panel B: forward-OOS lift
+cls_color = {"crypto":C_NAVY, "forex":C_RED, "commodity":C_TEAL}
+bar_colors = [cls_color[c] for _,_,c in rows]
+axB.barh(y, lift, height=0.6, color=bar_colors)
+axB.axvline(0, color=C_GRAY, ls="-", lw=1)
+axB.set_yticks(y); axB.set_yticklabels(labels)
+axB.set_xlabel("forward-OOS profitability lift (pp), gold-standard MC-MDD p50 filter")
+axB.set_title("(B) Forward-OOS lift from acting on the gold-standard rank")
+for yi, v in zip(y, lift):
+    axB.text(v + (0.08 if v>=0 else -0.08), yi, f"{v:+.2f}",
+             va="center", ha="left" if v>=0 else "right", fontsize=8)
+axB.set_xlim(min(lift)-1.2, max(lift)+1.2)
+from matplotlib.patches import Patch
+axB.legend(handles=[Patch(color=C_NAVY,label="crypto"),Patch(color=C_RED,label="forex"),
+                    Patch(color=C_TEAL,label="commodity")], fontsize=8, loc="lower right")
+
+fig.suptitle("Gold-standard bar-permutation MC: genuine in-sample edge (A) but near-zero "
+             "forward selection power (B)", fontsize=11.5, y=0.99)
+fig.tight_layout(rect=[0,0,1,0.96])
+for out in OUTS:
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out, bbox_inches="tight"); fig.savefig(out.with_suffix(".png"), dpi=130, bbox_inches="tight")
+print("saved gold mc figure")
+
+# ======================================================================
+# === Section: Fig portfolio OOS decile ===
+# ======================================================================
+
+#!/usr/bin/env python3
+"""Forward-OOS test of the portfolio MC-MDD signal (Section 6.3).
+Pooled OOS profitability by IS MC-MDD-rank decile -- values from
+Table tab:portfolio_oos_pooled_decile."""
+import os
+import numpy as np
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+from pathlib import Path
+
+ROOT = Path(os.environ.get("MC_PAPER_DATA", Path(__file__).resolve().parents[1]))
+OUTS = [ROOT / "results" / "figures" / "fig_portfolio_oos_decile.pdf"]
+C_NAVY="#1F3864"; C_TEAL="#2E8B57"; C_RED="#C0392B"; C_GRAY="#777"
+plt.rcParams.update({"font.size": 10, "font.family": "serif"})
+
+deciles = ["D1\n(0-10)","D2","D3","D4","D5","D6","D7","D8","D9","D10\n(90-100)"]
+same = [21.85,21.83,20.37,20.84,19.79,20.06,18.72,18.88,19.12,17.33]
+nxt  = [20.41,20.68,19.81,19.39,19.07,18.97,18.11,18.70,18.05,16.93]
+x = np.arange(10); w = 0.4
+
+fig, ax = plt.subplots(figsize=(11, 5.2))
+ax.bar(x-w/2, same, width=w, color=C_TEAL, alpha=0.85, label="same-window OOS")
+ax.bar(x+w/2, nxt,  width=w, color=C_NAVY, alpha=0.95, label="next-window OOS")
+# trend guide on next-window
+z = np.polyfit(x, nxt, 1); ax.plot(x, np.polyval(z, x), color=C_RED, ls="--", lw=1.5,
+        label=f"next-window trend ({z[0]:+.2f} pp/decile)")
+ax.set_xticks(x); ax.set_xticklabels(deciles, fontsize=8)
+ax.set_ylim(15, 23)
+ax.set_xlabel("Portfolio IS MC-MDD rank decile  (D1 = roughest IS equity  $\\rightarrow$  D10 = smoothest)")
+ax.set_ylabel("OOS profitability rate (\\%)")
+ax.set_title("Forward-OOS test: smoothest-IS portfolios (high MC-MDD rank) underperform out-of-sample")
+ax.legend(fontsize=9, loc="lower left")
+# annotate the top-bottom gap (upper-right area, clear of the legend and the tall left bars)
+ax.annotate(f"D1 $-$ D10 next-window gap: ${nxt[0]-nxt[-1]:+.2f}$ pp\n(top decile is lower)",
+            xy=(9, nxt[-1]+0.05), xytext=(5.0, 22.2),
+            fontsize=9, color=C_RED, ha="left", va="top",
+            arrowprops=dict(arrowstyle="->", color=C_RED, lw=1.2))
+fig.tight_layout()
+for out in OUTS:
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out, bbox_inches="tight"); fig.savefig(out.with_suffix(".png"), dpi=130, bbox_inches="tight")
+print("saved portfolio OOS decile figure")
+
+# ======================================================================
+# === Section: Fig MC by family heatmap ===
+# ======================================================================
+
+#!/usr/bin/env python3
+"""MC-MDD rank means by asset x indicator family (Section 4, by-family).
+Heatmap of the 63 asset-family cells, centred on the 50% benchmark."""
+import os
+import pandas as pd, numpy as np
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+from matplotlib.colors import TwoSlopeNorm
+from pathlib import Path
+
+ROOT = Path(os.environ.get("MC_PAPER_DATA", Path(__file__).resolve().parents[1]))
+SRC  = ROOT / "results" / "tables" / "table8_mc_by_family_corrected.csv"
+OUTS = [ROOT / "results" / "figures" / "fig_mc_by_family_heatmap.pdf"]
+plt.rcParams.update({"font.size": 10, "font.family": "serif"})
+
+df = pd.read_csv(SRC)
+assets = ["BTC","DOGE","BNB","SOL","EUR/USD","USD/JPY","EUR/GBP","XAU/USD","WTI"]
+fams   = ["ATR","EMA","PPO","RSI","SMA","STOCHK","OTHER"]
+M = df.pivot(index="Asset", columns="Family", values="Mean MC-MDD").reindex(index=assets, columns=fams)
+
+fig, ax = plt.subplots(figsize=(9, 7))
+norm = TwoSlopeNorm(vmin=44, vcenter=50, vmax=56)
+im = ax.imshow(M.values, cmap="RdBu_r", norm=norm, aspect="auto")
+ax.set_xticks(range(len(fams)));   ax.set_xticklabels(fams, rotation=30, ha="right")
+ax.set_yticks(range(len(assets))); ax.set_yticklabels(assets)
+for i in range(len(assets)):
+    for j in range(len(fams)):
+        v = M.values[i, j]
+        if not np.isnan(v):
+            ax.text(j, i, f"{v:.1f}", ha="center", va="center", fontsize=8,
+                    color="black")
+cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+cbar.set_label("Mean MC-MDD percentile rank")
+ax.set_title("MC-MDD rank means by asset $\\times$ indicator family (63 cells):\n"
+             "all cluster near the 50% exchangeability benchmark", fontsize=11)
+fig.tight_layout()
+for out in OUTS:
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out, bbox_inches="tight"); fig.savefig(out.with_suffix(".png"), dpi=130, bbox_inches="tight")
+print("range of cell means:", np.nanmin(M.values), np.nanmax(M.values))
+print("saved family heatmap")
+
+# ======================================================================
+# === Section: Fig cross-asset forest plot ===
+# ======================================================================
+
+#!/usr/bin/env python3
+"""Cross-asset forward-OOS confirmation (Section 6.4): per-instrument
+top-minus-bottom decile MC-MDD lift with 95% CIs (Table tab:portfolio_oos_topbottom)."""
+import os
+import numpy as np
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+from pathlib import Path
+
+ROOT = Path(os.environ.get("MC_PAPER_DATA", Path(__file__).resolve().parents[1]))
+OUTS = [ROOT / "results" / "figures" / "fig_crossasset_forest.pdf"]
+C_NAVY="#1F3864"; C_RED="#C0392B"; C_TEAL="#2E8B57"; C_GRAY="#777"
+plt.rcParams.update({"font.size": 10, "font.family": "serif"})
+
+# (label, class, lift, ci_lo, ci_hi)  -- top-decile minus bottom-decile, MC-MDD
+rows = [
+ ("BTC","crypto",-3.49,-6.02,-0.95),("DOGE","crypto",-3.74,-6.79,-0.69),
+ ("BNB","crypto",+1.85,-0.12,+3.81),("SOL","crypto",+1.67,-3.07,+6.40),
+ ("EUR/USD","forex",-0.21,-1.28,+0.86),("USD/JPY","forex",-0.88,-2.08,+0.33),
+ ("EUR/GBP","forex",-3.14,-6.66,+0.39),("XAU/USD","commodity",+5.26,+0.35,+10.16),
+ ("WTI","commodity",+1.48,-2.39,+5.36)]
+pooled = -3.48
+cls_color={"crypto":C_NAVY,"forex":C_RED,"commodity":C_TEAL}
+
+y = np.arange(len(rows))[::-1]
+fig, ax = plt.subplots(figsize=(9, 5.6))
+for yi,(lab,cl,v,lo,hi) in zip(y,rows):
+    ax.plot([lo,hi],[yi,yi], color=cls_color[cl], lw=2)
+    ax.plot(v, yi, "o", color=cls_color[cl], ms=7)
+ax.axvline(0, color="black", lw=1)
+ax.axvline(pooled, color=C_GRAY, ls="--", lw=1.3)
+ax.text(pooled, len(rows)-0.4, f" pooled {pooled:+.2f}", color=C_GRAY, fontsize=8, va="bottom")
+ax.set_yticks(y); ax.set_yticklabels([r[0] for r in rows])
+ax.set_xlabel("Top-decile $-$ bottom-decile next-window OOS profitability (pp), MC-MDD rank")
+ax.set_title("Cross-asset confirmation: portfolio MC-MDD rank has no consistent positive\n"
+             "forward-OOS lift (CIs straddle zero on 6 of 9; BTC/DOGE negative, XAU/USD positive)")
+from matplotlib.patches import Patch
+ax.legend(handles=[Patch(color=C_NAVY,label="crypto"),Patch(color=C_RED,label="forex"),
+                   Patch(color=C_TEAL,label="commodity")], fontsize=8, loc="lower right")
+ax.margins(y=0.08)
+fig.tight_layout()
+for out in OUTS:
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out, bbox_inches="tight"); fig.savefig(out.with_suffix(".png"), dpi=130, bbox_inches="tight")
+print("saved cross-asset forest figure")
+
+# ======================================================================
+# === Section: Fig cost sensitivity ===
+# ======================================================================
+
+#!/usr/bin/env python3
+"""Transaction-cost sensitivity (Section 7.4): MC filter lift across cost levels,
+per instrument. Replaces the dense 144-row table. Source table16 CSV."""
+import os
+import pandas as pd, numpy as np
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+from pathlib import Path
+
+ROOT = Path(os.environ.get("MC_PAPER_DATA", Path(__file__).resolve().parents[1]))
+SRC  = ROOT / "results" / "tables" / "table16_cost_sensitivity_corrected.csv"
+OUTS = [ROOT / "results" / "figures" / "fig_cost_sensitivity.pdf"]
+plt.rcParams.update({"font.size": 9.5, "font.family": "serif"})
+C = {"MC-MDD p50":"#1F3864","MC-Calmar p50":"#2E8B57","MC-Ulcer p50":"#7E57C2",
+     "MC-ROI* p50 (art.)":"#C0392B"}
+CL_SHORT = {"Baseline (1x fee, 1x slip)":"Baseline","Fee+100% (2x fee)":"Fee+100%",
+            "Slip+200% (3x slip)":"Slip+200%","Entry+Indicator drift":"Ent+drift"}
+
+df = pd.read_csv(SRC)
+df["clab"] = df["Cost Level"].map(CL_SHORT)
+costs = ["Baseline","Fee+100%","Slip+200%","Ent+drift"]
+filters = ["MC-MDD p50","MC-Calmar p50","MC-Ulcer p50","MC-ROI* p50 (art.)"]
+assets = [("BTC","BTC"),("DOGE","DOGE"),("BNB","BNB"),("SOL","SOL"),
+          ("EURUSD","EUR/USD"),("USDJPY","USD/JPY"),("EURGBP","EUR/GBP"),
+          ("XAUUSD","XAU/USD"),("WTI","WTI")]
+x = np.arange(len(costs)); w = 0.2
+
+fig, axes = plt.subplots(3, 3, figsize=(13, 9.5), sharex=True, sharey=True)
+for ax,(key,label) in zip(axes.ravel(), assets):
+    sub = df[df.Asset==key]
+    for i,filt in enumerate(filters):
+        vals = [sub[(sub.clab==c)&(sub["MC Filter"]==filt)]["Lift (pp)"].mean() for c in costs]
+        ax.bar(x + (i-1.5)*w, vals, width=w, color=C[filt],
+               label=filt.replace(" p50","").replace(" (art.)","*"))
+    ax.axhline(0, color="black", lw=0.8)
+    ax.set_title(label, fontsize=10); ax.set_xticks(x); ax.set_xticklabels(costs, fontsize=7.5, rotation=15)
+    ax.set_ylim(-4.6, 1.2)
+for ax in axes[:,0]: ax.set_ylabel("MC+IS lift (pp)")
+axes[0,0].legend(fontsize=7, loc="lower left", ncol=1, framealpha=0.9)
+fig.suptitle("Transaction-cost sensitivity: the MC filter's incremental lift over the IS-PF gate is essentially flat "
+             "across cost levels\non every instrument (near zero on crypto/commodity; a few pp negative on forex from "
+             "IS-PF dilution) --- cost is not a confound",
+             fontsize=10.5, y=0.995)
+fig.tight_layout(rect=[0,0,1,0.96])
+for out in OUTS:
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out, bbox_inches="tight"); fig.savefig(out.with_suffix(".png"), dpi=130, bbox_inches="tight")
+print("saved cost sensitivity figure")
+
+# ======================================================================
+# === Section: Fig synthetic ground-truth ranks ===
+# ======================================================================
+
+#!/usr/bin/env python3
+"""Synthetic ground-truth MC rank behaviour (Appendix: synthetic validation).
+Mean MC percentile rank by scenario x metric -- source synthetic_mc_rank_stats_corrected.csv."""
+import os
+import pandas as pd, numpy as np
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+from pathlib import Path
+
+ROOT = Path(os.environ.get("MC_PAPER_DATA", Path(__file__).resolve().parents[1]))
+SRC  = ROOT / "results" / "tables" / "synthetic_mc_rank_stats_corrected.csv"
+OUTS = [ROOT / "results" / "figures" / "fig_synthetic_groundtruth_ranks.pdf"]
+plt.rcParams.update({"font.size": 10, "font.family": "serif"})
+C = {"MDD":"#1F3864","Calmar":"#2E8B57","ROI*":"#C0392B"}
+SC = {"A":"A: realistic returns\n(heavy tails, GARCH, regimes)",
+      "B":"B: data-mining\n(MA-crossover scan)",
+      "CMP":"C: correlated\nportfolios"}
+
+df = pd.read_csv(SRC)
+scen = ["A","B","CMP"]; metrics = ["MDD","Calmar","ROI*"]
+x = np.arange(len(scen)); w = 0.26
+fig, ax = plt.subplots(figsize=(9.5, 5.2))
+for i,met in enumerate(metrics):
+    vals = [df[(df.Scenario==s)&(df.Metric==met)]["Mean"].iloc[0] for s in scen]
+    bars = ax.bar(x + (i-1)*w, vals, width=w, color=C[met],
+                  label=("MC-"+met) if met!="ROI*" else "MC-ROI* (sum-based, artefactual)")
+    for b,v in zip(bars, vals):
+        ax.text(b.get_x()+b.get_width()/2, v+0.6, f"{v:.0f}", ha="center", fontsize=8)
+ax.axhline(50, color="#777", ls="--", lw=1.2)
+ax.text(x[-1]+0.45, 50.5, "50% benchmark", color="#777", fontsize=8, va="bottom", ha="right")
+ax.set_xticks(x); ax.set_xticklabels([SC[s] for s in scen], fontsize=8.5)
+ax.set_ylabel("mean MC percentile rank")
+ax.set_ylim(0, 60)
+ax.set_title("Synthetic ground truth: path-dependent MC ranks (MDD, Calmar) sit near the 50% benchmark\n"
+             "with only a small edge-driven leftshift; the sum-based ROI* is artefactually pinned far left",
+             fontsize=10.5)
+ax.legend(fontsize=8.5, loc="upper right")
+fig.tight_layout()
+for out in OUTS:
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out, bbox_inches="tight"); fig.savefig(out.with_suffix(".png"), dpi=130, bbox_inches="tight")
+print("saved synthetic ground-truth figure")
