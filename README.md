@@ -1,5 +1,7 @@
 # Monte Carlo Filter Evaluation — Reproducibility Package
 
+> Paper by Daniel Gatto. Figures, discussion and the rest of the research line: [daru.finance/research](https://www.daru.finance/research).
+
 Analysis code accompanying the paper
 
 > **Predictive Value of Within-Strategy Permutation Tests for Forward Selection:**
